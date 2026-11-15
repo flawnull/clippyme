@@ -1,7 +1,7 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
 
-import { validateSlug, buildPlatformTargets, classifyStartError, clampMonitorTimings, clampPostsPerDay, clipSelectionPayload } from './liveMonitorForm.js';
+import { validateSlug, buildPlatformTargets, classifyStartError, clampMonitorTimings, clampPostsPerDay, clampReviewMinutes, reviewLabel, clipSelectionPayload } from './liveMonitorForm.js';
 
 test('validateSlug: kick/twitch required, charset, length', () => {
   assert.equal(validateSlug(''), 'Channel is required');
@@ -117,4 +117,20 @@ test('clampPostsPerDay bounds the daily cap and treats blank as no cap', () => {
   assert.equal(clampPostsPerDay(250), 100);
   assert.equal(clampPostsPerDay(-3), 0);
   assert.equal(clampPostsPerDay('abc'), 0);
+});
+
+test('clampReviewMinutes bounds the review window and treats blank as none', () => {
+  assert.equal(clampReviewMinutes(''), 0);
+  assert.equal(clampReviewMinutes('20'), 20);
+  assert.equal(clampReviewMinutes(5000), 1440);
+  assert.equal(clampReviewMinutes(-1), 0);
+});
+
+test('reviewLabel counts down to the post time', () => {
+  const now = 1_000_000_000_000;
+  const in12 = now / 1000 + 11.5 * 60;
+  assert.equal(reviewLabel(in12, true, now), ' · posts in 12 min');
+  assert.equal(reviewLabel(in12, false, now), ' · review 12 min');
+  assert.equal(reviewLabel(now / 1000 - 5, true, now), ' · posting soon');
+  assert.equal(reviewLabel(undefined, true, now), '');
 });

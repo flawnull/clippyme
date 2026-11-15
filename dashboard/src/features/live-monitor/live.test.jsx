@@ -452,3 +452,28 @@ test('Settings drawer applies post timing, daily cap and chat signal', async () 
   const partial = updateMonitorConfig.mock.calls[0][1];
   expect(partial).toMatchObject({ post_timing: 'asap', max_posts_per_day: 5, chat_signal: false });
 });
+
+test('review window rides the start payload and the Settings drawer', async () => {
+  const { startLiveMonitor, updateMonitorConfig } = await import('../../api/client');
+  mockStatus.mockResolvedValue({
+    monitors: [{ id: 'kick:n3on', platform: 'kick', mode: 'live', running: true, state: 'capturing',
+      channel: 'n3on', publishing_enabled: true, pending_publish: 1, config: { review_minutes: 0 },
+      pending_clips: [{ publication_id: 'p-1', title: 'Big moment', viral_score: 90, state: 'queued',
+        video_url: '/videos/j1/clip_0.mp4', review_until: Date.now() / 1000 + 9.5 * 60 }] }],
+  });
+  render(<LiveMonitorView />);
+  expect(await screen.findByText(/posts in 10 min/)).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+  fireEvent.change(screen.getByLabelText('Settings review minutes kick:n3on'), { target: { value: '20' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+  await waitFor(() => expect(updateMonitorConfig).toHaveBeenCalled());
+  expect(updateMonitorConfig.mock.calls[0][1].review_minutes).toBe(20);
+
+  fireEvent.change(screen.getByLabelText('Review window minutes'), { target: { value: '15' } });
+  fireEvent.change(screen.getByLabelText('Channel'), { target: { value: 'xqc' } });
+  await waitFor(() => expect(screen.getByRole('button', { name: /Start monitor/ })).not.toBeDisabled());
+  fireEvent.click(screen.getByRole('button', { name: /Start monitor/ }));
+  await waitFor(() => expect(startLiveMonitor).toHaveBeenCalled());
+  expect(startLiveMonitor.mock.calls[0][0].review_minutes).toBe(15);
+});

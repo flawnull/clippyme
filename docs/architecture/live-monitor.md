@@ -82,6 +82,13 @@ flowchart LR
   outside ClippyMe on later days are not counted.
 - `min_gap_seconds`, `post_timing` and `max_posts_per_day` are re-read before
   every publish, so a runtime config update applies to the next clip.
+- **Review window** (`review_minutes`, default 0 = none): a newly queued clip
+  is stamped `review_until = queued_at + review_minutes`. Until then it is not
+  due, so it sits in the dashboard list with its Discard button; afterwards
+  the drain publishes it like any other entry. An entry is due at the later of
+  `review_until` and its retry `next_retry_at`. Re-queuing an entry (restore)
+  keeps its original clock, and changing `review_minutes` affects only clips
+  queued afterwards.
 - Title and caption templates accept `{title}` and `{hook}`; optional AI
   instructions steer clip selection.
 - Publishing can be paused and resumed per monitor
