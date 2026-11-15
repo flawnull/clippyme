@@ -111,7 +111,7 @@ function MonitorSettings({ monitor, onApply, applying }) {
   const [smartCutTouched, setSmartCutTouched] = useState(false);
   const [zoom, setZoom] = useState(zoomToPercent(cfg.letterbox_zoom));
   const [zoomTouched, setZoomTouched] = useState(false);
-  const [postTiming, setPostTiming] = useState(cfg.post_timing === 'asap' ? 'asap' : 'prime_time');
+  const [postTiming, setPostTiming] = useState(cfg.post_timing === 'prime_time' ? 'prime_time' : 'asap');
   const [postTimingTouched, setPostTimingTouched] = useState(false);
   const [maxPerDay, setMaxPerDay] = useState(typeof cfg.max_posts_per_day === 'number' ? String(cfg.max_posts_per_day) : '');
   const [chatSignal, setChatSignal] = useState(cfg.chat_signal !== false);
@@ -361,10 +361,10 @@ export function LiveMonitorView({ pushToast }) {
   const [segmentMin, setSegmentMin] = useState(30);
   const [preliveMin, setPreliveMin] = useState(30);
   const [minGapMin, setMinGapMin] = useState(15);
-  const [postTiming, setPostTiming] = useState('prime_time');
-  const [maxPerDay, setMaxPerDay] = useState(0);
+  const [postTiming, setPostTiming] = useState('asap');
+  const [maxPerDay, setMaxPerDay] = useState(6);
   const [chatSignal, setChatSignal] = useState(true);
-  const [reviewMin, setReviewMin] = useState(0);
+  const [reviewMin, setReviewMin] = useState(15);
   const [catchup, setCatchup] = useState('backfill');
   const [clipSelection, setClipSelection] = useState('fixed');
   const [maxClips, setMaxClips] = useState(5);

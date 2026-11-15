@@ -12,7 +12,7 @@ from clippyme.monitoring.live_monitor import LiveMonitor, validate_monitor_confi
 def _monitor(tmp_path, publishing=False):
     mon = LiveMonitor(id="kick:n3on", jobs={}, job_queue=None, output_dir=str(tmp_path / "out"))
     mon.cfg = validate_monitor_config({
-        "platform": "kick", "channel": "n3on", "timezone": "UTC",
+        "platform": "kick", "channel": "n3on", "timezone": "UTC", "review_minutes": 0,
         "platforms": [{"platform": "tiktok", "accountId": "a"}]}, default_timezone="UTC")
     mon.publishing_enabled = publishing
     os.makedirs(mon._clip_dir, exist_ok=True)

@@ -406,9 +406,9 @@ test('no queued-clips section when nothing is waiting', async () => {
 test('post timing, daily cap and chat signal ride the start payload', async () => {
   const { startLiveMonitor } = await import('../../api/client');
   render(<LiveMonitorView />);
-  expect(screen.getByText(/can be hours later/)).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: 'As soon as possible' }));
   expect(screen.getByText(/Never 01:00-08:00/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Prime time' }));
+  expect(screen.getByText(/can be hours later/)).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText('Max posts per day'), { target: { value: '6' } });
   fireEvent.click(screen.getByRole('switch', { name: 'Chat signal' }));
   fireEvent.change(screen.getByLabelText('Channel'), { target: { value: 'n3on' } });
@@ -416,12 +416,12 @@ test('post timing, daily cap and chat signal ride the start payload', async () =
   fireEvent.click(screen.getByRole('button', { name: /Start monitor/ }));
   await waitFor(() => expect(startLiveMonitor).toHaveBeenCalled());
   const payload = startLiveMonitor.mock.calls[0][0];
-  expect(payload.post_timing).toBe('asap');
+  expect(payload.post_timing).toBe('prime_time');
   expect(payload.max_posts_per_day).toBe(6);
   expect(payload.chat_signal).toBe(false);
 });
 
-test('defaults keep prime time, no cap and chat signal on', async () => {
+test('defaults: as soon as possible, 6 a day, 15 min review, chat signal on', async () => {
   const { startLiveMonitor } = await import('../../api/client');
   render(<LiveMonitorView />);
   fireEvent.change(screen.getByLabelText('Channel'), { target: { value: 'n3on' } });
@@ -429,8 +429,9 @@ test('defaults keep prime time, no cap and chat signal on', async () => {
   fireEvent.click(screen.getByRole('button', { name: /Start monitor/ }));
   await waitFor(() => expect(startLiveMonitor).toHaveBeenCalled());
   const payload = startLiveMonitor.mock.calls[0][0];
-  expect(payload.post_timing).toBe('prime_time');
-  expect(payload.max_posts_per_day).toBe(0);
+  expect(payload.post_timing).toBe('asap');
+  expect(payload.max_posts_per_day).toBe(6);
+  expect(payload.review_minutes).toBe(15);
   expect(payload.chat_signal).toBe(true);
 });
 

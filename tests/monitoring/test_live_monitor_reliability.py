@@ -17,6 +17,8 @@ from clippyme.monitoring.live_monitor import LiveMonitor, LiveMonitorRegistry, v
 from clippyme.integrations import social_publisher as sp
 from clippyme.integrations.social_publisher import ZernioError
 
+pytestmark = pytest.mark.usefixtures("instant_publish_defaults")
+
 
 def _cfg(**over):
     raw = {

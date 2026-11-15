@@ -404,10 +404,10 @@ class LiveMonitorStartRequest(BaseModel):
     chat_signal: bool = True
     # "prime_time" schedules inside prime-time windows; "asap" posts as soon
     # as min_gap_seconds allows. max_posts_per_day: 0 = no cap.
-    post_timing: str = Field("prime_time", pattern=r"^(prime_time|asap)$")
-    max_posts_per_day: int = Field(0, ge=0, le=100)
+    post_timing: str = Field("asap", pattern=r"^(prime_time|asap)$")
+    max_posts_per_day: int = Field(6, ge=0, le=100)
     # Minutes a queued clip waits for review before it publishes (0 = none).
-    review_minutes: int = Field(0, ge=0, le=1440)
+    review_minutes: int = Field(15, ge=0, le=1440)
 
     @field_validator("timezone")
     @classmethod

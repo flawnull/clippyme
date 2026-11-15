@@ -107,10 +107,12 @@ def _cfg(**kw):
         "platforms": [{"platform": "tiktok", "accountId": "a"}], **kw})
 
 
-def test_config_defaults_keep_the_old_behaviour():
+def test_config_defaults_suit_live_clipping():
     cfg = _cfg()
-    assert cfg["post_timing"] == "prime_time"
-    assert cfg["max_posts_per_day"] == 0
+    assert cfg["post_timing"] == "asap"
+    assert cfg["max_posts_per_day"] == 6
+    assert cfg["review_minutes"] == 15
+    assert _cfg(post_timing="prime_time", max_posts_per_day=0)["max_posts_per_day"] == 0
 
 
 def test_config_validates_and_updates_at_runtime():
@@ -124,7 +126,7 @@ def test_config_validates_and_updates_at_runtime():
 def test_runtime_config_reaches_the_scheduler(tmp_path):
     """min_gap_seconds used to be read only when the monitor started."""
     mon = LiveMonitor(id="kick:n3on", jobs={}, job_queue=None, output_dir=str(tmp_path))
-    mon.cfg = _cfg(min_gap_seconds=900)
+    mon.cfg = _cfg(min_gap_seconds=900, post_timing="prime_time")
     mon._sync_scheduler()
     assert (mon._scheduler.min_gap_seconds, mon._scheduler.asap) == (900, False)
     mon.cfg = validate_monitor_partial_update(
