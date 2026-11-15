@@ -400,6 +400,8 @@ class LiveMonitorStartRequest(BaseModel):
     smart_cut: bool = False
     # Fixed zoom on the monitor's letterbox render (percent; 0 = whole frame).
     letterbox_zoom: float = Field(0, ge=0, le=15)
+    # Record live chat during each segment and hint its spikes to Gemini.
+    chat_signal: bool = True
 
     @field_validator("timezone")
     @classmethod

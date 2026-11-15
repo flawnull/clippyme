@@ -166,6 +166,7 @@ How these interact: [architecture/reframe.md](../architecture/reframe.md).
 | `ZERNIO_MIN_GAP_SECONDS` | `5400` | Minimum gap between posts when a manual publish uses `auto` scheduling (SmartScheduler). Live monitors use their own `min_gap_seconds`. | — |
 | `ZERNIO_HTTP_TIMEOUT` / `ZERNIO_UPLOAD_TIMEOUT` | `60` / `600` | Request and upload timeouts. | Slow uplinks. |
 | `TWITCH_CLIENT_ID` / `TWITCH_CLIENT_SECRET` | unset | Twitch Helix app credentials for Twitch monitors (usually entered in Settings). | — |
+| `CLIPPYME_KICK_PUSHER_URL` | Kick's public Pusher websocket | Endpoint the chat signal reads Kick chat from. Kick does not document it. | Kick chat stops arriving after Kick changes its app key. |
 
 Monitor behaviour (segment length, spacing, clip selection, templates) is set
 per monitor in the dashboard, not by environment variables; see

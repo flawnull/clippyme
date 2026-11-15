@@ -71,10 +71,19 @@ worth knowing (full list: [docs/architecture/live-monitor.md](docs/architecture/
 - TikTok and Instagram cut reach for raw reposts. Keep the hook, subtitles and
   banner on, which the monitor does by default.
 
-## Known gap
+## Chat signal
 
-Moment picking reads the transcript only. It does not look at chat, so a
-gameplay moment where chat explodes but nobody says much can be missed. A
-chat-spike trigger (messages per second, emote bursts) is the obvious first
-improvement. [hamzaskewl/clippy](https://github.com/hamzaskewl/clippy) (MIT)
-has a working Twitch version to borrow from.
+Monitors on Kick and Twitch read the live chat while each segment records.
+When chat suddenly floods (laughing, `????`, W spam), the times of those
+spikes go to Gemini with the segment, so it looks at moments the transcript
+alone would miss. It is on by default, reads chat anonymously, and never
+posts anything. If chat can't be reached, clipping works as before. Details:
+[docs/architecture/live-monitor.md](docs/architecture/live-monitor.md).
+
+To check it works, look at the backend log after a segment finishes:
+
+```bash
+docker compose logs backend | grep -i "chat"
+```
+
+A line like `1843 chat messages, spikes found` means it is working.

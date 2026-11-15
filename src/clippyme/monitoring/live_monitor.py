@@ -444,6 +444,10 @@ def validate_monitor_config(config: dict, default_timezone: str = "Europe/Rome")
         # Fixed zoom on the letterbox render (monitors always run reframe
         # 'disabled'). 0 = whole frame between the bars, else 0.05-0.15.
         "letterbox_zoom": _letterbox_zoom_or_zero(config.get("letterbox_zoom")),
+        # Record live chat during each segment and pass its spikes to Gemini
+        # as a hint (monitoring/chat_signal.py). Kick and Twitch live mode only;
+        # a chat failure never blocks the segment.
+        "chat_signal": _validate_bool(config.get("chat_signal", True), "chat_signal"),
     }
 
 
@@ -454,7 +458,7 @@ _UPDATABLE_CONFIG_FIELDS = (
     "instructions", "caption_template", "title_template", "min_gap_seconds",
     "segment_seconds", "prelive_skip_seconds", "platforms", "banner", "compose",
     "poll_interval", "delete_after_publish", "max_clips", "clip_selection",
-    "min_viral_score", "smart_cut", "letterbox_zoom",
+    "min_viral_score", "smart_cut", "letterbox_zoom", "chat_signal",
 )
 
 # The full set of cfg keys worth persisting/restoring (mirrors
@@ -465,6 +469,7 @@ _SNAPSHOT_CONFIG_FIELDS = (
     "instructions", "caption_template", "title_template", "timezone",
     "banner", "compose", "catchup", "delete_after_publish", "max_clips",
     "clip_selection", "min_viral_score", "smart_cut", "letterbox_zoom",
+    "chat_signal",
 )
 
 
@@ -576,11 +581,18 @@ class KickStrategy:
         from clippyme.integrations.kick_client import KickClient
         self.channel = channel
         self._client = KickClient()
+        self.chatroom_id = None  # learned from the channel JSON while polling
 
     def get_live_state(self):
         from clippyme.integrations.kick_client import is_live, playback_url, stream_started_at
+        from clippyme.monitoring.chat_signal import kick_chatroom_id
         ch = self._client.get_channel(self.channel)
+        self.chatroom_id = kick_chatroom_id(ch) or self.chatroom_id
         return is_live(ch), playback_url(ch), stream_started_at(ch)
+
+    def chat_target(self):
+        """(platform, channel, chatroom_id) for the chat-signal recorder."""
+        return "kick", self.channel, self.chatroom_id
 
     def capture_args(self, seg_path: str, seconds: int, url):
         if url:
@@ -609,6 +621,10 @@ class TwitchStrategy:
         from clippyme.integrations.twitch_client import stream_is_live, stream_started_at
         streams = self._client.get_stream(self.channel)
         return stream_is_live(streams), None, stream_started_at(streams)
+
+    def chat_target(self):
+        """(platform, channel, chatroom_id) for the chat-signal recorder."""
+        return "twitch", self.channel, None
 
     def capture_args(self, seg_path: str, seconds: int, url):
         if not shutil.which("streamlink"):
@@ -706,6 +722,9 @@ class LiveMonitor:
         # job_id → the segment file the job reads (None for URL jobs). The job
         # owns the file until it is terminal; a restart re-attaches to it.
         self._inflight_jobs: dict[str, str | None] = {}
+        # seg_path -> chat-spike hint for that segment's job (not persisted:
+        # it is baked into the job's argv at submit time).
+        self._chat_hints: dict[str, str] = {}
         self._provider_failures = 0
         self._provider_retry_after = 0.0
         # Every good clip is composed at segment-completion and written here,
@@ -1060,7 +1079,14 @@ class LiveMonitor:
             # state None: the provider didn't answer — no proof the stream
             # ended. Keep capturing on the last known URL; the capture itself
             # comes back empty (→ session end) if it really went offline.
-            seg_path = await self._capture_segment(url)
+            recorder = self._start_chat_recorder()
+            try:
+                seg_path = await self._capture_segment(url)
+            except BaseException:
+                if recorder:
+                    recorder.cancel()
+                raise
+            chat_events = await recorder.stop() if recorder else []
             if seg_path is None:
                 break
             duration = await asyncio.to_thread(probe_duration, seg_path)
@@ -1068,7 +1094,10 @@ class LiveMonitor:
             if not should_process_segment(duration):
                 _safe_remove(seg_path)
                 break
+            if recorder:
+                self._remember_chat_hint(seg_path, chat_events, duration)
             job_id = await self._submit_waiting_for_queue(self._submit_segment_job, seg_path)
+            self._chat_hints.pop(seg_path, None)
             if job_id is None:
                 # Stopped while the queue was full: no job owns the segment and
                 # nothing tracks it across a restart — release it, loudly.
@@ -1116,6 +1145,38 @@ class LiveMonitor:
             if state is not None and not state[0]:  # unknown ≠ offline: keep waiting
                 return False
         return not self._stop.is_set()
+
+    def _start_chat_recorder(self):
+        """Start recording chat for the next segment, or None when the chat
+        signal is off or this platform has no chat target. Never raises."""
+        if not self.cfg.get("chat_signal", True):
+            return None
+        target = getattr(self._strategy, "chat_target", None)
+        if target is None:
+            return None
+        try:
+            from clippyme.integrations.chat_listener import ChatRecorder
+            platform, channel, chatroom_id = target()
+            recorder = ChatRecorder(platform, channel, chatroom_id=chatroom_id)
+            recorder.start()
+            return recorder
+        except Exception:
+            logger.warning("LiveMonitor %s: chat recorder failed to start", self.id,
+                           exc_info=True)
+            return None
+
+    def _remember_chat_hint(self, seg_path: str, events, duration: float) -> None:
+        """Turn one segment's chat into a Gemini hint, kept for its job."""
+        from clippyme.monitoring.chat_signal import build_chat_hint
+        try:
+            hint = build_chat_hint(events, duration)
+        except Exception:
+            logger.warning("LiveMonitor %s: chat hint failed", self.id, exc_info=True)
+            return
+        logger.info("LiveMonitor %s: %d chat messages, %s", self.id, len(events),
+                    "spikes found" if hint else "no spike")
+        if hint:
+            self._chat_hints[seg_path] = hint
 
     async def _capture_segment(self, url: str | None) -> str | None:
         """Capture up to ``segment_seconds`` of the live stream to a file."""
@@ -1481,14 +1542,22 @@ class LiveMonitor:
         from clippyme.jobs.job_results import build_main_cmd
         from clippyme.jobs.job_submission import submit_job
 
+        from clippyme.jobs.job_results import MAX_INSTRUCTIONS_LEN
+        from clippyme.monitoring.chat_signal import merge_instructions
+
         job_id, job_dir, env = self._new_job_dir()
+        # Chat spikes recorded during this segment's capture, if any. Read, not
+        # popped: a QueueFullError retry submits the same segment again.
+        instructions = merge_instructions(
+            self.cfg.get("instructions"), self._chat_hints.get(seg_path, ""),
+            MAX_INSTRUCTIONS_LEN)
         # Letterbox (reframe disabled): the monitor recipe places a hook in the
         # top bar, the attribution banner attached under the video band, and
         # subtitles below it — all of which need the un-reframed 9:16 layout.
         cmd = build_main_cmd(input_path=os.path.abspath(seg_path), output_dir=job_dir,
                              reframe_mode="disabled",
                              letterbox_zoom=self.cfg.get("letterbox_zoom") or 0,
-                             instructions=self.cfg.get("instructions") or None,
+                             instructions=instructions,
                              monitor=True)
         # input_path: the segment IS the job's source — recording it makes the
         # job resumable after a restart and protects the file from the upload
