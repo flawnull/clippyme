@@ -90,6 +90,13 @@ _RESOLVE_ERROR_PREFIX = "channel resolve failed"
 # always in the future, the slot windows of a day span at most 24 h, and the
 # min-gap check only reaches back min_gap_seconds (validated to <= 24 h).
 PICKED_SLOT_RETENTION_SECONDS = 86400
+# Health alerts (phone notifications): at most one per kind per cooldown.
+ALERT_COOLDOWN_SECONDS = 3600
+DISK_ALERT_COOLDOWN_SECONDS = 6 * 3600
+# Stream detection must fail this many checks in a row before alerting.
+PROVIDER_ALERT_AFTER = 5
+# Free space under which each new segment triggers a low-disk alert.
+LOW_DISK_ALERT_GB = 5.0
 # How long an accepted clip stays in the ``published`` dedup guard after its
 # job has no queued entry left: Zernio's Idempotency-Key replay window. Past it
 # a queued duplicate can only come from a job still referenced by the queue,
@@ -844,6 +851,7 @@ class LiveMonitor:
         self._chat_hints: dict[str, str] = {}
         self._provider_failures = 0
         self._provider_retry_after = 0.0
+        self._alert_last: dict[str, float] = {}  # alert kind -> last sent (time.time)
         # Every good clip is composed at segment-completion and written here,
         # title-named with a continuous (never-reset) collision counter so no
         # two files ever collide. Folder path is derived from id (not persisted);
@@ -1143,6 +1151,10 @@ class LiveMonitor:
             self.last_error = f"{_PROVIDER_ERROR_PREFIX} ({self._provider_failures}x): {exc}"
             logger.warning("LiveMonitor %s: live-state check failed (%d in a row): %s",
                            self.id, self._provider_failures, exc)
+            if self._provider_failures >= PROVIDER_ALERT_AFTER:
+                self._alert("provider", f"Can't check {self.cfg.get('channel')} on {self.platform}",
+                            f"{self._provider_failures} checks in a row failed: {str(exc)[:160]}\n"
+                            "No clips are captured until it answers again.")
             return None
         if self._provider_failures:
             logger.info("LiveMonitor %s: provider answering again after %d failed checks",
@@ -1216,6 +1228,7 @@ class LiveMonitor:
                 break
             if recorder:
                 self._remember_chat_hint(seg_path, chat_events, duration)
+            self._check_disk()
             job_id = await self._submit_waiting_for_queue(self._submit_segment_job, seg_path)
             self._chat_hints.pop(seg_path, None)
             if job_id is None:
@@ -1747,12 +1760,20 @@ class LiveMonitor:
                 if status is None or status in _TERMINAL_STATUSES:
                     logger.warning("LiveMonitor %s: job %s ended '%s' — no clips published",
                                    self.id, job_id, status)
+                if status == "failed":
+                    logs = self._jobs.get(job_id, {}).get("logs") or []
+                    last = str(logs[-1])[:200] if logs else "no details"
+                    self._alert("job_failed", f"Segment failed · {self.cfg.get('channel')}",
+                                f"A segment produced no clips.\n{last}")
                 return
             result = self._jobs.get(job_id, {}).get("result") or {}
             if result.get("gemini_exhausted"):
                 self._gemini_exhausted_at = datetime.now(timezone.utc).isoformat()
                 self._persist()
                 logger.warning("LiveMonitor %s: Gemini rate-limited — segment %s skipped", self.id, job_id)
+                self._alert("gemini", "Gemini quota used up",
+                            f"A segment from {self.cfg.get('channel')} was skipped. The free "
+                            "quota resets daily; Gemini 3.5 Flash Lite in Settings allows more requests.")
             clips = result.get("clips") or []
             if clips:
                 self._gemini_exhausted_at = None  # a good segment clears the notice
@@ -1941,6 +1962,30 @@ class LiveMonitor:
             return
         self._track_task(loop.create_task(asyncio.to_thread(
             notifier.send, title, message, tags=tuple(tags), priority=priority)))
+
+    def _alert(self, kind: str, title: str, message: str, *,
+               cooldown: float = ALERT_COOLDOWN_SECONDS) -> None:
+        """Phone alert for something that needs the owner, at most once per
+        ``kind`` per ``cooldown`` so a stuck problem doesn't spam."""
+        now = time.time()
+        last = self._alert_last.get(kind)
+        if last is not None and now - last < cooldown:
+            return
+        self._alert_last[kind] = now
+        self._notify(title, message, tags=("warning",), priority=4)
+
+    def _check_disk(self) -> None:
+        """Alert when free space runs low; the pipeline preflight refuses new
+        jobs below CLIPPYME_MIN_FREE_DISK_GB, which would skip segments."""
+        try:
+            free_gb = shutil.disk_usage(self._output_dir).free / (1024 ** 3)
+        except OSError:
+            return
+        if free_gb < LOW_DISK_ALERT_GB:
+            self._alert("disk", "Disk almost full",
+                        f"{free_gb:.1f} GB left. Delete old jobs in History, "
+                        "or new segments will be skipped.",
+                        cooldown=DISK_ALERT_COOLDOWN_SECONDS)
 
     def _enqueue_publications(self, entries: list[dict]) -> None:
         """Durably queue finished clips, then make sure the drain runs."""
@@ -2529,6 +2574,8 @@ class LiveMonitorRegistry:
                 mon.start(cfg)
             except Exception as exc:
                 logger.exception("LiveMonitor %s: auto-resume failed", mid)
+                mon._alert("resume", f"Monitor didn't restart · {mid}",
+                           f"{str(exc)[:200]}\nOpen Live Monitor and start it again.")
                 mon.state = "auto_resume_failed"
                 mon.last_error = str(exc)
                 self._monitors[mid] = mon
