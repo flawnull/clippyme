@@ -60,7 +60,7 @@ def test_status_shows_when_each_clip_posts(tmp_path, monkeypatch):
     assert mon.status()["pending_clips"][0]["review_until"] == clock.t + 15 * 60
 
 
-def test_no_review_window_by_default(tmp_path, monkeypatch):
+def test_no_review_window_when_set_to_zero(tmp_path, monkeypatch):
     mon, _ = _monitor(tmp_path, monkeypatch, review=0)
     _enqueue(mon, [_entry("j1", 0)])
     assert "review_until" not in mon._pending_publish[0]
@@ -124,6 +124,7 @@ def test_review_minutes_config():
     cfg = validate_monitor_config({
         "platform": "kick", "channel": "n3on",
         "platforms": [{"platform": "tiktok", "accountId": "a"}]})
-    assert cfg["review_minutes"] == 0
+    assert cfg["review_minutes"] == 15
+    assert validate_monitor_partial_update({"review_minutes": 0}, cfg)["review_minutes"] == 0
     assert validate_monitor_partial_update({"review_minutes": 20}, cfg)["review_minutes"] == 20
     assert validate_monitor_partial_update({"review_minutes": 99999}, cfg)["review_minutes"] == 1440

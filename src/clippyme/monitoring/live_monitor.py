@@ -433,8 +433,15 @@ def _validate_clip_selection(value) -> str:
     return selection
 
 
+# Defaults tuned for clipping live streams on new accounts: post while the
+# moment is fresh, give the owner a window to discard, cap the daily volume.
+DEFAULT_POST_TIMING = "asap"
+DEFAULT_MAX_POSTS_PER_DAY = 6
+DEFAULT_REVIEW_MINUTES = 15
+
+
 def _validate_post_timing(value) -> str:
-    timing = str(value or "prime_time").strip().lower()
+    timing = str(value or DEFAULT_POST_TIMING).strip().lower()
     if timing not in POST_TIMINGS:
         raise ValidationError(f"post_timing must be one of {list(POST_TIMINGS)}")
     return timing
@@ -551,10 +558,12 @@ def validate_monitor_config(config: dict, default_timezone: str = "Europe/Rome")
         "post_timing": _validate_post_timing(config.get("post_timing")),
         # Posts per local day across every monitor sharing the slot list
         # (0 = no cap). Protects new accounts from a busy stream's burst.
-        "max_posts_per_day": _clamp_int(config.get("max_posts_per_day"), 0, 0, 100),
+        "max_posts_per_day": _clamp_int(config.get("max_posts_per_day"),
+                                        DEFAULT_MAX_POSTS_PER_DAY, 0, 100),
         # Minutes a finished clip waits in the queue (Discard-able in the
         # dashboard) before it publishes on its own. 0 = publish when due.
-        "review_minutes": _clamp_int(config.get("review_minutes"), 0, 0, 1440),
+        "review_minutes": _clamp_int(config.get("review_minutes"),
+                                     DEFAULT_REVIEW_MINUTES, 0, 1440),
     }
 
 
@@ -2485,6 +2494,14 @@ class LiveMonitorRegistry:
                 on_state_change=self.persist)
             mon.restore(snap)
             try:
+                # Re-validate like a fresh start: a snapshot written by an
+                # older version holds None for fields added since, and
+                # LiveMonitor.start() trusts its cfg (None chat_signal read
+                # as False, None review_minutes as 0).
+                from clippyme.storage.config_store import load_zernio_config
+                cfg = validate_monitor_config(
+                    cfg, default_timezone=cfg.get("timezone")
+                    or load_zernio_config().get("timezone"))
                 mon.start(cfg)
             except Exception as exc:
                 logger.exception("LiveMonitor %s: auto-resume failed", mid)

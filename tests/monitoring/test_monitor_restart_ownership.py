@@ -32,6 +32,8 @@ from .test_live_monitor_reliability import (
     ScriptedStrategy, _fake_publisher, _until, _wire_e2e,
 )
 
+pytestmark = pytest.mark.usefixtures("instant_publish_defaults")
+
 RAW = {"platform": "twitch", "channel": "foo", "timezone": "UTC", "loop": True,
        "prelive_skip_seconds": 0, "segment_seconds": 600,
        "platforms": [{"platform": "tiktok", "accountId": "a"}]}

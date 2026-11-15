@@ -36,6 +36,8 @@ from .test_live_monitor_reliability import (
     ScriptedStrategy, _entry, _fake_publisher, _monitor, _until, _wire_e2e,
 )
 
+pytestmark = pytest.mark.usefixtures("instant_publish_defaults")
+
 
 def _fake_clock(monkeypatch, start=1_000_000.0):
     clock = [start]

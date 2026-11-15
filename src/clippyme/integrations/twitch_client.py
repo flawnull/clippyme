@@ -86,7 +86,9 @@ class TwitchClient:
         import requests
         if self._token and not force and time.time() < self._token_exp - 60:
             return self._token
-        resp = requests.post(TOKEN_URL, params={
+        # Form body, not query string: requests puts the URL in its error
+        # messages, which reach monitor last_error and the dashboard.
+        resp = requests.post(TOKEN_URL, data={
             "client_id": self._cid,
             "client_secret": self._secret,
             "grant_type": "client_credentials",

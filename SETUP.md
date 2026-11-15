@@ -56,12 +56,11 @@ worth knowing (full list: [docs/architecture/live-monitor.md](docs/architecture/
 - **Clip selection `auto`** drops clips with a viral score under 70, so a dull
   segment posts nothing. Prefer it over `fixed`, which always posts the top 5.
 - **Spacing** between posts is 15 minutes across all monitors by default.
-- **Post timing:** pick **As soon as possible** for streams. The default,
-  Prime time, can hold a clip for hours until an evening window, and stream
-  clips go stale fast.
-- **Max posts per day:** set 5-8 for new accounts. It counts posts from every
-  monitor, and extra clips move to the next day.
-- **Review window:** set it to 15-20 minutes and leave auto-publish on. Each
+- **Post timing:** **As soon as possible** (default). Prime time can hold a
+  clip for hours until an evening window, and stream clips go stale fast.
+- **Max posts per day:** 6 by default. It counts posts from every monitor,
+  and extra clips move to the next day.
+- **Review window:** 15 minutes by default; leave auto-publish on. Each
   new clip shows under the monitor with a countdown and a **Discard** button,
   then posts on its own. You only act on the bad ones.
 - **Publishing can be paused** per monitor. While paused, waiting clips show
