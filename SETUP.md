@@ -55,8 +55,12 @@ worth knowing (full list: [docs/architecture/live-monitor.md](docs/architecture/
   processes each one. **Mode `vod`** waits for the finished VOD.
 - **Clip selection `auto`** drops clips with a viral score under 70, so a dull
   segment posts nothing. Prefer it over `fixed`, which always posts the top 5.
-- **Spacing** between posts is 15 minutes across all monitors. There is no
-  daily cap, so set one yourself by limiting `max_clips`.
+- **Spacing** between posts is 15 minutes across all monitors by default.
+- **Post timing:** pick **As soon as possible** for streams. The default,
+  Prime time, can hold a clip for hours until an evening window, and stream
+  clips go stale fast.
+- **Max posts per day:** set 5-8 for new accounts. It counts posts from every
+  monitor, and extra clips move to the next day.
 - **Publishing can be paused** per monitor. While paused, waiting clips show
   under the monitor with a preview. Click **Discard** on the bad ones, then
   turn auto-publish on to post the rest.

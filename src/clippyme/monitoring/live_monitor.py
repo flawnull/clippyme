@@ -40,6 +40,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
+from datetime import time as dtime
 
 from clippyme.clips.clip_locks import clip_lock
 from clippyme.core.errors import ConflictError, NotFoundError, ValidationError
@@ -301,6 +302,29 @@ def build_monitor_compose(platform: str, channel: str, clip: dict, override=None
     }
 
 
+# How a monitor times its posts: inside the prime-time windows (SmartScheduler)
+# or as soon as the minimum gap allows.
+POST_TIMINGS = ("prime_time", "asap")
+# "asap" posts this long after the clip is ready, so the upload has time to land.
+ASAP_LEAD_SECONDS = 120
+# "asap" never posts in this local-time window; a clip ready then waits for its end.
+ASAP_QUIET_HOURS = (1, 8)
+# A daily cap pushes posts to later days, at most this far ahead.
+MAX_SCHEDULE_DAYS = 14
+
+
+def _normalize_stamps(stamps, tzinfo) -> list:
+    """Bring every stamp into ``tzinfo`` (naive stays naive), like SmartScheduler."""
+    out = []
+    for stamp in stamps:
+        if tzinfo is not None:
+            stamp = stamp.replace(tzinfo=tzinfo) if stamp.tzinfo is None else stamp.astimezone(tzinfo)
+        elif stamp.tzinfo is not None:
+            stamp = stamp.replace(tzinfo=None)
+        out.append(stamp)
+    return out
+
+
 @dataclass
 class SharedGapScheduler(SmartScheduler):
     """SmartScheduler that also avoids slots already picked this run.
@@ -310,11 +334,56 @@ class SharedGapScheduler(SmartScheduler):
     otherwise see each other. Merging ``picked_slots`` enforces the minimum gap
     across every clip scheduled. The registry injects ONE shared ``picked_slots``
     list into every monitor's scheduler so the gap is GLOBAL across monitors.
+
+    ``asap`` replaces the prime-time windows with "first moment the gap allows,
+    outside ASAP_QUIET_HOURS". ``daily_cap`` (0 = none) moves a post to the next
+    day once a local day already holds that many posts; it counts every
+    monitor's picks (shared list) plus Zernio's posts for the target day.
     """
     picked_slots: list = field(default_factory=list)
+    asap: bool = False
+    daily_cap: int = 0
+
+    def _day_full(self, day, taken) -> bool:
+        if not self.daily_cap:
+            return False
+        return sum(1 for stamp in taken if stamp.date() == day) >= self.daily_cap
+
+    def _asap_slot(self, day, taken, now):
+        lead = now + timedelta(seconds=ASAP_LEAD_SECONDS)
+        if day <= now.date():
+            candidate = lead.replace(second=0, microsecond=0) + timedelta(minutes=1)
+        else:
+            candidate = datetime.combine(day, dtime(hour=ASAP_QUIET_HOURS[1]), tzinfo=now.tzinfo)
+        quiet_start, quiet_end = ASAP_QUIET_HOURS
+        for _ in range(MAX_SCHEDULE_DAYS * 24 * 12):  # 5-minute steps
+            if quiet_start <= candidate.hour < quiet_end:
+                candidate = candidate.replace(hour=quiet_end, minute=0)
+            if self._gap_ok(candidate, taken):
+                return candidate
+            candidate += timedelta(minutes=5)
+        return candidate
 
     def find_slot(self, day, occupied, now=None):
-        slot = super().find_slot(day, list(occupied) + self.picked_slots, now=now)
+        now = now or datetime.now()
+        taken = _normalize_stamps(list(occupied) + self.picked_slots, now.tzinfo)
+        target = day
+        slot = None
+        for _ in range(MAX_SCHEDULE_DAYS):
+            if self._day_full(target, taken):
+                target += timedelta(days=1)
+                continue
+            if self.asap:
+                slot = self._asap_slot(target, taken, now)
+            else:
+                slot = super().find_slot(target, taken, now=now)
+            if slot.date() != target and self._day_full(slot.date(), taken):
+                target = slot.date() + timedelta(days=1)  # spilled into a full day
+                slot = None
+                continue
+            break
+        if slot is None:  # every day in range full: stop capping, never lose the post
+            slot = super().find_slot(target, taken, now=now)
         self.picked_slots.append(slot)
         return slot
 
@@ -361,6 +430,13 @@ def _validate_clip_selection(value) -> str:
     if selection not in ("fixed", "auto"):
         raise ValidationError("clip_selection must be 'fixed' or 'auto'")
     return selection
+
+
+def _validate_post_timing(value) -> str:
+    timing = str(value or "prime_time").strip().lower()
+    if timing not in POST_TIMINGS:
+        raise ValidationError(f"post_timing must be one of {list(POST_TIMINGS)}")
+    return timing
 
 
 def _letterbox_zoom_or_zero(value) -> float:
@@ -466,6 +542,12 @@ def validate_monitor_config(config: dict, default_timezone: str = "Europe/Rome")
         # as a hint (monitoring/chat_signal.py). Kick and Twitch live mode only;
         # a chat failure never blocks the segment.
         "chat_signal": _validate_bool(config.get("chat_signal", True), "chat_signal"),
+        # "prime_time" (default) schedules inside SmartScheduler's windows;
+        # "asap" posts as soon as min_gap_seconds allows (SharedGapScheduler).
+        "post_timing": _validate_post_timing(config.get("post_timing")),
+        # Posts per local day across every monitor sharing the slot list
+        # (0 = no cap). Protects new accounts from a busy stream's burst.
+        "max_posts_per_day": _clamp_int(config.get("max_posts_per_day"), 0, 0, 100),
     }
 
 
@@ -477,6 +559,7 @@ _UPDATABLE_CONFIG_FIELDS = (
     "segment_seconds", "prelive_skip_seconds", "platforms", "banner", "compose",
     "poll_interval", "delete_after_publish", "max_clips", "clip_selection",
     "min_viral_score", "smart_cut", "letterbox_zoom", "chat_signal",
+    "post_timing", "max_posts_per_day",
 )
 
 # The full set of cfg keys worth persisting/restoring (mirrors
@@ -487,7 +570,7 @@ _SNAPSHOT_CONFIG_FIELDS = (
     "instructions", "caption_template", "title_template", "timezone",
     "banner", "compose", "catchup", "delete_after_publish", "max_clips",
     "clip_selection", "min_viral_score", "smart_cut", "letterbox_zoom",
-    "chat_signal",
+    "chat_signal", "post_timing", "max_posts_per_day",
 )
 
 
@@ -1880,6 +1963,24 @@ class LiveMonitor:
                 return
             await self._on_publish_accepted(entry, clip_path, result)
 
+    def _local_today(self) -> date:
+        from zoneinfo import ZoneInfo
+        try:
+            return datetime.now(ZoneInfo(self.cfg.get("timezone") or "UTC")).date()
+        except Exception:
+            return date.today()
+
+    def _sync_scheduler(self) -> None:
+        """Apply the current cfg to the scheduler built at start(), so runtime
+        updates of min_gap_seconds / post_timing / max_posts_per_day reach it."""
+        if self._scheduler is None:
+            self._scheduler = SharedGapScheduler(
+                min_gap_seconds=self.cfg.get("min_gap_seconds") or 0,
+                picked_slots=self._picked_slots)
+        self._scheduler.min_gap_seconds = int(self.cfg.get("min_gap_seconds") or 0)
+        self._scheduler.asap = self.cfg.get("post_timing") == "asap"
+        self._scheduler.daily_cap = int(self.cfg.get("max_posts_per_day") or 0)
+
     async def _publish_serialized(self, entry: dict, upload_path: str, title: str,
                                   caption: str, clip_path: str) -> dict:
         """One publish under the GLOBAL lock, with the inline 429 handling.
@@ -1893,9 +1994,13 @@ class LiveMonitor:
         from clippyme.integrations.social_publisher import ZernioError, publish_clip
 
         async with self._publish_lock:
+            self._sync_scheduler()
             attempt = 0
             day_rolls = 0
-            start_date = None  # None → scheduler picks today/tomorrow
+            # None → publish_clip picks today, or tomorrow from 22:00. "asap"
+            # always starts from today in the monitor's timezone: a clip ready
+            # at 22:30 should go out tonight, not tomorrow.
+            start_date = self._local_today().isoformat() if self._scheduler.asap else None
             while True:
                 # Before measuring: slots_before must index this call's pick.
                 prune_picked_slots(self._picked_slots, datetime.now(timezone.utc),

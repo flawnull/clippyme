@@ -402,3 +402,53 @@ test('no queued-clips section when nothing is waiting', async () => {
   await screen.findByText('n3on');
   expect(screen.queryByText(/Queued to publish/)).not.toBeInTheDocument();
 });
+
+test('post timing, daily cap and chat signal ride the start payload', async () => {
+  const { startLiveMonitor } = await import('../../api/client');
+  render(<LiveMonitorView />);
+  expect(screen.getByText(/can be hours later/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'As soon as possible' }));
+  expect(screen.getByText(/Never 01:00-08:00/)).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText('Max posts per day'), { target: { value: '6' } });
+  fireEvent.click(screen.getByRole('switch', { name: 'Chat signal' }));
+  fireEvent.change(screen.getByLabelText('Channel'), { target: { value: 'n3on' } });
+  await waitFor(() => expect(screen.getByRole('button', { name: /Start monitor/ })).not.toBeDisabled());
+  fireEvent.click(screen.getByRole('button', { name: /Start monitor/ }));
+  await waitFor(() => expect(startLiveMonitor).toHaveBeenCalled());
+  const payload = startLiveMonitor.mock.calls[0][0];
+  expect(payload.post_timing).toBe('asap');
+  expect(payload.max_posts_per_day).toBe(6);
+  expect(payload.chat_signal).toBe(false);
+});
+
+test('defaults keep prime time, no cap and chat signal on', async () => {
+  const { startLiveMonitor } = await import('../../api/client');
+  render(<LiveMonitorView />);
+  fireEvent.change(screen.getByLabelText('Channel'), { target: { value: 'n3on' } });
+  await waitFor(() => expect(screen.getByRole('button', { name: /Start monitor/ })).not.toBeDisabled());
+  fireEvent.click(screen.getByRole('button', { name: /Start monitor/ }));
+  await waitFor(() => expect(startLiveMonitor).toHaveBeenCalled());
+  const payload = startLiveMonitor.mock.calls[0][0];
+  expect(payload.post_timing).toBe('prime_time');
+  expect(payload.max_posts_per_day).toBe(0);
+  expect(payload.chat_signal).toBe(true);
+});
+
+test('Settings drawer applies post timing, daily cap and chat signal', async () => {
+  const { updateMonitorConfig } = await import('../../api/client');
+  mockStatus.mockResolvedValue({
+    monitors: [{ id: 'kick:n3on', platform: 'kick', mode: 'live', running: true, state: 'capturing',
+      channel: 'n3on', config: { post_timing: 'prime_time', max_posts_per_day: 0, chat_signal: true } }],
+  });
+  render(<LiveMonitorView />);
+  await screen.findByText('n3on');
+  fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+  const drawer = document.querySelector('.cfg-drawer');
+  fireEvent.click(within(drawer).getByRole('button', { name: 'As soon as possible' }));
+  fireEvent.change(screen.getByLabelText('Settings max posts per day kick:n3on'), { target: { value: '5' } });
+  fireEvent.click(screen.getByRole('switch', { name: 'Chat signal kick:n3on' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+  await waitFor(() => expect(updateMonitorConfig).toHaveBeenCalled());
+  const partial = updateMonitorConfig.mock.calls[0][1];
+  expect(partial).toMatchObject({ post_timing: 'asap', max_posts_per_day: 5, chat_signal: false });
+});
