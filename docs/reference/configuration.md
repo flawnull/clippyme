@@ -167,7 +167,7 @@ How these interact: [architecture/reframe.md](../architecture/reframe.md).
 | `ZERNIO_HTTP_TIMEOUT` / `ZERNIO_UPLOAD_TIMEOUT` | `60` / `600` | Request and upload timeouts. | Slow uplinks. |
 | `TWITCH_CLIENT_ID` / `TWITCH_CLIENT_SECRET` | unset | Twitch Helix app credentials for Twitch monitors (usually entered in Settings). | — |
 | `NTFY_TOPIC` | unset | ntfy topic for phone notifications: new clips from a monitor, and clips that fail to post (usually set in Settings, which generates a random one). 8-64 letters, digits, `-` or `_`. Anyone who knows a topic can read it. | — |
-| `CLIPPYME_KICK_PUSHER_URL` | Kick's public Pusher websocket | Endpoint the chat signal reads Kick chat from. Kick does not document it. | Kick chat stops arriving after Kick changes its app key. |
+| `CLIPPYME_KICK_PUSHER_URL` | unset (asks Kick's realtime endpoint, falls back to a known key) | Fixed websocket URL for Kick chat, skipping the key lookup. Kick does not document either. | Kick changes its chat setup and the lookup stops working. |
 
 Monitor behaviour (segment length, spacing, clip selection, templates) is set
 per monitor in the dashboard, not by environment variables; see

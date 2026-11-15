@@ -263,3 +263,74 @@ def test_segment_job_dir_gets_the_chat_spikes_for_the_fallback(tmp_path):
     job_id = asyncio.run(submit())
     saved = read_spikes(mon._jobs[job_id]["output_dir"])
     assert len(saved) == 1 and saved[0]["reaction"] == "laugh"
+
+
+# -- Kick key lookup and quiet-chat handling -----------------------------------
+
+def _realtime(key="34bf7a0ff419a2a775b9", cluster="us2"):
+    return {"data": {"connections": [
+        {"provider": "centrifugo", "credentials": {"url": "wss://x"}},
+        {"provider": "pusher", "credentials": {"app_key": key, "cluster": cluster}}]}}
+
+
+def test_parse_kick_realtime_picks_pusher_and_checks_formats():
+    assert chat_listener.parse_kick_realtime(_realtime()) == ("34bf7a0ff419a2a775b9", "us2")
+    assert chat_listener.parse_kick_realtime(_realtime(cluster="us2.evil.com/x")) is None
+    assert chat_listener.parse_kick_realtime(_realtime(key="not-a-key")) is None
+    assert chat_listener.parse_kick_realtime({"data": {}}) is None
+    assert chat_listener.parse_kick_realtime(None) is None
+
+
+def test_kick_url_uses_lookup_then_cache_then_refresh(monkeypatch):
+    monkeypatch.delenv("CLIPPYME_KICK_PUSHER_URL", raising=False)
+    monkeypatch.setattr(chat_listener, "_kick_cache", {})
+    answers = [("aaaaaaaaaaaaaaaaaaaa", "eu"), ("bbbbbbbbbbbbbbbbbbbb", "us3")]
+    monkeypatch.setattr(chat_listener, "_ask_kick_realtime", lambda: answers.pop(0))
+    first = chat_listener.kick_pusher_url()
+    assert first.startswith("wss://ws-eu.pusher.com/app/aaaaaaaaaaaaaaaaaaaa?")
+    assert chat_listener.kick_pusher_url() == first          # cached, no second lookup
+    assert "bbbbbbbbbbbbbbbbbbbb" in chat_listener.kick_pusher_url(refresh=True)
+
+
+def test_kick_url_falls_back_when_lookup_fails_and_env_overrides(monkeypatch):
+    monkeypatch.delenv("CLIPPYME_KICK_PUSHER_URL", raising=False)
+    monkeypatch.setattr(chat_listener, "_kick_cache", {})
+
+    def boom():
+        raise ConnectionError("cloudflare")
+
+    monkeypatch.setattr(chat_listener, "_ask_kick_realtime", boom)
+    key, cluster = chat_listener.FALLBACK_KICK_PUSHER
+    assert chat_listener.kick_pusher_url() == chat_listener.pusher_url(key, cluster)
+    monkeypatch.setenv("CLIPPYME_KICK_PUSHER_URL", "wss://custom/app/x")
+    assert chat_listener.kick_pusher_url() == "wss://custom/app/x"
+
+
+class _SilentThenPong:
+    """recv() times out once, then answers the ping."""
+
+    def __init__(self, answer_ping=True):
+        self.sent, self.calls, self.answer_ping = [], 0, answer_ping
+
+    async def send(self, data):
+        self.sent.append(data)
+
+    async def recv(self):
+        self.calls += 1
+        if self.calls == 1 or not self.answer_ping:
+            await asyncio.sleep(10)
+        return "PONG :tmi.twitch.tv"
+
+
+def test_quiet_chat_is_pinged_not_reconnected(monkeypatch):
+    monkeypatch.setattr(chat_listener, "_RECV_TIMEOUT", 0.05)
+    ws = _SilentThenPong()
+    assert asyncio.run(chat_listener._recv(ws, "PING :tmi.twitch.tv")) == "PONG :tmi.twitch.tv"
+    assert ws.sent == ["PING :tmi.twitch.tv"]
+
+
+def test_dead_connection_still_times_out(monkeypatch):
+    import pytest
+    monkeypatch.setattr(chat_listener, "_RECV_TIMEOUT", 0.05)
+    with pytest.raises(TimeoutError):
+        asyncio.run(chat_listener._recv(_SilentThenPong(answer_ping=False), "PING"))

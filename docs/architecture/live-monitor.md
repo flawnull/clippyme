@@ -38,7 +38,11 @@ again automatically.
   per monitor.
 - **Chat signal** (`chat_signal`, default on, Kick and Twitch `live` mode):
   while a segment is captured, `integrations/chat_listener.py` reads the
-  channel's chat anonymously (read-only; nothing is ever sent). When the
+  channel's chat anonymously (read-only; nothing is ever sent). Kick's Pusher
+  app key rotates (October 2026), so the listener asks Kick's realtime
+  endpoint for the current key and cluster, caches it for an hour, re-asks
+  after a refused connection, and falls back to a known key. A silent minute
+  triggers a ping; only a second silent minute reconnects. When the
   segment is submitted, `monitoring/chat_signal.py` bins the messages into
   10-second buckets, weighting reaction messages (KEKW, `????`, W) double, and
   marks buckets at 2.5x the segment's median and at least 8 weight as spikes.
