@@ -5,7 +5,8 @@
 import { useState, useEffect } from 'react';
 import { Hero } from '../../components/headers';
 import { Icon, Panel, Btn, Badge, Switch, Segmented, PlatPill, PLATFORMS } from '../../components/primitives';
-import { getZernio, startLiveMonitor, stopLiveMonitor, updateMonitorConfig, setMonitorPublishing } from '../../api/client';
+import { getZernio, startLiveMonitor, stopLiveMonitor, updateMonitorConfig, setMonitorPublishing, discardPendingClip } from '../../api/client';
+import { getApiUrl } from '../../api/config';
 import { PLAT } from '../publishing/publish';
 import { validateSlug, buildPlatformTargets, classifyStartError, clampMonitorTimings, clipSelectionPayload, zoomToPercent, LETTERBOX_ZOOM_PERCENTS } from './liveMonitorForm';
 import { buildMonitorBannerPayload } from './liveMonitorBanner';
@@ -207,7 +208,46 @@ function MonitorSettings({ monitor, onApply, applying }) {
   );
 }
 
-function MonitorCard({ monitor, onStop, stopping, onApplySettings, applyingSettings, onTogglePublishing, togglingPublishing }) {
+// Clips waiting in the monitor's auto-publish queue. Reviewing them is the
+// point of pausing publishing: discard the ones that should never go out.
+function PendingClips({ monitor, onDiscard, discardingId }) {
+  const clips = monitor.pending_clips || [];
+  if (clips.length === 0) return null;
+  const more = (monitor.pending_publish || 0) - clips.length;
+  return (
+    <div style={{ display: 'grid', gap: 8, marginTop: 4 }}>
+      <div className="od">Queued to publish. Discard any clip you don&apos;t want posted; it stays in History.</div>
+      {clips.map((c) => {
+        const busy = c.state === 'in_flight';
+        return (
+          <div key={c.publication_id} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            {c.video_url && (
+              <video src={getApiUrl(c.video_url)} controls muted playsInline preload="metadata"
+                aria-label={`Preview: ${c.title || 'clip'}`}
+                style={{ width: 72, height: 128, objectFit: 'cover', borderRadius: 8, background: '#000', flexShrink: 0 }} />
+            )}
+            <div className="otxt" style={{ minWidth: 0 }}>
+              <div className="ot">{c.title || 'Untitled clip'}</div>
+              <div className="od">
+                {typeof c.viral_score === 'number' ? `Score ${c.viral_score}` : 'No score'}
+                {busy ? ' · publishing now' : c.state === 'retry_wait' ? ' · retrying' : ''}
+              </div>
+            </div>
+            <Btn variant="secondary" size="sm" icon="trash-2"
+              disabled={busy || discardingId === c.publication_id}
+              aria-label={`Discard ${c.title || 'clip'}`}
+              onClick={() => onDiscard(monitor.id, c.publication_id)}>
+              {discardingId === c.publication_id ? 'Discarding…' : 'Discard'}
+            </Btn>
+          </div>
+        );
+      })}
+      {more > 0 && <div className="od">+{more} more queued</div>}
+    </div>
+  );
+}
+
+function MonitorCard({ monitor, onStop, stopping, onApplySettings, applyingSettings, onTogglePublishing, togglingPublishing, onDiscard, discardingId }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   return (
     <div className="opt" style={{ borderBottom: 0, flexDirection: 'column', alignItems: 'stretch' }}>
@@ -253,6 +293,8 @@ function MonitorCard({ monitor, onStop, stopping, onApplySettings, applyingSetti
           onChange={(on) => onTogglePublishing(monitor.id, on)} />
       </div>
 
+      <PendingClips monitor={monitor} onDiscard={onDiscard} discardingId={discardingId} />
+
       {settingsOpen && (
         <MonitorSettings monitor={monitor} onApply={onApplySettings} applying={applyingSettings} />
       )}
@@ -290,6 +332,7 @@ export function LiveMonitorView({ pushToast }) {
   const [stoppingId, setStoppingId] = useState(null);
   const [applyingSettingsId, setApplyingSettingsId] = useState(null);
   const [togglingPublishingId, setTogglingPublishingId] = useState(null);
+  const [discardingId, setDiscardingId] = useState(null);
 
   const [monitors, refreshMonitors, meta] = useLiveMonitorStatus();
 
@@ -378,6 +421,19 @@ export function LiveMonitorView({ pushToast }) {
     }
   };
 
+  const onDiscard = async (monitorId, publicationId) => {
+    setDiscardingId(publicationId);
+    try {
+      await discardPendingClip(monitorId, publicationId);
+      pushToast?.('info', 'Clip discarded. It won\'t be posted.');
+      refreshMonitors();
+    } catch (e) {
+      pushToast?.('error', 'Discard failed: ' + String(e.message || e).slice(0, 60));
+    } finally {
+      setDiscardingId(null);
+    }
+  };
+
   return (
     <div className="container narrow fade-in">
       <Hero eyebrow="Live Monitor" line1="Auto-clip a channel." grad="live."
@@ -392,7 +448,8 @@ export function LiveMonitorView({ pushToast }) {
         {monitors.map((m) => (
           <MonitorCard key={m.id} monitor={m} onStop={onStop} stopping={stoppingId === m.id}
             onApplySettings={onApplySettings} applyingSettings={applyingSettingsId === m.id}
-            onTogglePublishing={onTogglePublishing} togglingPublishing={togglingPublishingId === m.id} />
+            onTogglePublishing={onTogglePublishing} togglingPublishing={togglingPublishingId === m.id}
+            onDiscard={onDiscard} discardingId={discardingId} />
         ))}
       </Panel>
 

@@ -75,6 +75,13 @@ flowchart LR
 - Publishing can be paused and resumed per monitor
   (`POST /api/live-monitor/{id}/publishing`). Pending clips are persisted and
   drain on resume or after a restart.
+- While clips wait, the dashboard lists them (`pending_clips` in the monitor
+  status) with a preview and a Discard button
+  (`POST /api/live-monitor/{id}/pending/{publication_id}/discard`). Discarding
+  removes the entry from the persisted queue and deletes the monitor's composed
+  copy; the clip stays in its job for History and manual publishing. A clip
+  already `in_flight` answers 409. The drain re-checks the queue after its
+  spacing sleep, so a clip discarded during that sleep is never published.
 - A publication has a stable `publication_id` and a `request_id` used as the
   Zernio `Idempotency-Key`. Retries back off from 60 s to 1 h, at most 8
   attempts. Identity and idempotency rules are in

@@ -17,7 +17,7 @@ rules, and the conventions they share.
 | Clip editing | `POST /api/compose/{job_id}/{clip_index}`, `POST /api/smartcut/…`, `GET /api/transcript/…`, `POST /api/edit-ai/…`, `POST /api/reframe/…` | See [pipeline](../architecture/pipeline.md#compose-edit-layers). |
 | Publishing | `POST /api/publish/{job_id}/{clip_index}`, `GET /api/zernio/accounts` | See [publishing](../architecture/publishing.md). |
 | History | `GET /api/history`, `POST /api/history/{job_id}/restore`, `DELETE /api/history/{job_id}` | Jobs found on disk. |
-| Live monitor | `POST /api/live-monitor/start\|stop`, `POST /api/live-monitor/{id}/config`, `POST /api/live-monitor/{id}/publishing`, `GET /api/live-monitor/status` | See [live monitor](../architecture/live-monitor.md). |
+| Live monitor | `POST /api/live-monitor/start\|stop`, `POST /api/live-monitor/{id}/config`, `POST /api/live-monitor/{id}/publishing`, `POST /api/live-monitor/{id}/pending/{publication_id}/discard`, `GET /api/live-monitor/status` | See [live monitor](../architecture/live-monitor.md). |
 | Settings | `/api/config`, `/api/config/models`, `/api/config/cookies…`, `/api/config/fonts…`, `/api/config/logo…`, `/api/config/zernio` | Trusted clients only (below). |
 | Health | `GET /api/health` | Liveness. |
 
