@@ -142,6 +142,7 @@ _ALLOWED_CONFIG_KEYS = frozenset({
     "GEMINI_API_KEY", "GEMINI_MODEL", "YOUTUBE_COOKIES", "HF_TOKEN",
     "HUGGINGFACE_TOKEN", "DEEPGRAM_API_KEY", "ELEVENLABS_API_KEY",
     "TRANSCRIPTION_PROVIDER", "TWITCH_CLIENT_ID", "TWITCH_CLIENT_SECRET",
+    "NTFY_TOPIC",
 })
 
 
@@ -157,6 +158,11 @@ class ConfigUpdateRequest(BaseModel):
         for name, value in values.items():
             if len(value) > 4096:
                 raise ValueError(f"config value for {name!r} too long (max 4096)")
+        topic = values.get("NTFY_TOPIC")
+        if topic:
+            from clippyme.integrations.notifier import valid_topic
+            if not valid_topic(topic):
+                raise ValueError("NTFY_TOPIC must be 8-64 letters, digits, '-' or '_'")
         provider = values.get("TRANSCRIPTION_PROVIDER")
         if provider not in (None, "", "deepgram", "elevenlabs", "whisper"):
             raise ValueError("TRANSCRIPTION_PROVIDER must be deepgram, elevenlabs or whisper")

@@ -116,6 +116,15 @@ flowchart LR
   queued / in flight / waiting to retry) a manual publish of that clip answers
   409. A failed publication releases it.
 
+## Phone notifications
+
+With an ntfy topic saved (`NTFY_TOPIC`, Settings), `integrations/notifier.py`
+posts to ntfy.sh: one notification per batch of newly queued clips (titles,
+scores, and when they post given the review window and auto-publish state),
+and one when a clip fails to post for good. A re-queued entry (restart
+hand-off) does not notify again. Sending runs in a worker thread, is
+best-effort and never raises into the monitor.
+
 ## Failure handling
 
 | Situation | Behaviour |

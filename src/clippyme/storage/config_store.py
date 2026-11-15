@@ -20,6 +20,7 @@ VALID_CONFIG_KEYS = (
     "TRANSCRIPTION_PROVIDER",
     "TWITCH_CLIENT_ID",
     "TWITCH_CLIENT_SECRET",
+    "NTFY_TOPIC",
 )
 ZERNIO_CONFIG_NAMESPACE = "zernio"
 _CONFIG_LOCK = threading.RLock()
@@ -167,6 +168,7 @@ def load_persistent_config() -> dict:
         "TRANSCRIPTION_PROVIDER": os.environ.get("TRANSCRIPTION_PROVIDER", "deepgram"),
         "TWITCH_CLIENT_ID": os.environ.get("TWITCH_CLIENT_ID", ""),
         "TWITCH_CLIENT_SECRET": os.environ.get("TWITCH_CLIENT_SECRET", ""),
+        "NTFY_TOPIC": os.environ.get("NTFY_TOPIC", ""),
     }
     raw = _read_raw_config()
     config.update({key: value for key, value in raw.items() if key in VALID_CONFIG_KEYS})

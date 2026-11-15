@@ -8,6 +8,7 @@ import { SettingsView } from './settings.jsx';
 
 const getConfig = vi.fn();
 const saveConfig = vi.fn();
+const sendTestNotification = vi.fn();
 
 vi.mock('../../api/client', () => ({
   getConfig: (...a) => getConfig(...a),
@@ -25,6 +26,7 @@ vi.mock('../../api/client', () => ({
   logoStatus: vi.fn(async () => ({ configured: false })),
   uploadLogo: vi.fn(),
   deleteLogo: vi.fn(),
+  sendTestNotification: (...a) => sendTestNotification(...a),
 }));
 
 const EMPTY_CONFIG = { GEMINI_API_KEY: '', HF_TOKEN: '', DEEPGRAM_API_KEY: '', ELEVENLABS_API_KEY: '' };
@@ -109,4 +111,27 @@ test('Twitch client id/secret rows show empty when unset', async () => {
   mount();
   const idRow = () => screen.getByLabelText('Twitch client ID').closest('.keyrow');
   await waitFor(() => expect(within(idRow()).getByText('empty')).toBeInTheDocument());
+});
+
+test('Generate saves a private ntfy topic and shows it once to subscribe', async () => {
+  getConfig.mockResolvedValueOnce(EMPTY_CONFIG).mockResolvedValue({ ...EMPTY_CONFIG, NTFY_TOPIC: 'clip...abcd' });
+  mount();
+  const testBtn = await screen.findByRole('button', { name: 'Send test' });
+  expect(testBtn).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Generate' }));
+  await waitFor(() => expect(saveConfig).toHaveBeenCalled());
+  const topic = saveConfig.mock.calls[0][0].NTFY_TOPIC;
+  expect(topic).toMatch(/^clippyme-[a-z0-9]{16}$/);
+  expect(screen.getByText(topic)).toBeInTheDocument();
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Send test' })).not.toBeDisabled());
+});
+
+test('Send test reports success from the backend', async () => {
+  getConfig.mockResolvedValue({ ...EMPTY_CONFIG, NTFY_TOPIC: 'clip...abcd' });
+  sendTestNotification.mockResolvedValue({ sent: true });
+  const toast = mount();
+  const btn = await screen.findByRole('button', { name: 'Send test' });
+  await waitFor(() => expect(btn).not.toBeDisabled());
+  fireEvent.click(btn);
+  await waitFor(() => expect(toast).toHaveBeenCalledWith('success', 'Test sent. Check your phone.'));
 });

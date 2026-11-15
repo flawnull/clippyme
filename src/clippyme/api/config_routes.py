@@ -106,7 +106,7 @@ async def get_config(request: Request):
     # Secret keys are never returned verbatim — even short values are masked so
     # a brief key can't leak. Non-secret flags (model/provider) pass through.
     secret_keys = {"GEMINI_API_KEY", "HF_TOKEN", "DEEPGRAM_API_KEY", "ELEVENLABS_API_KEY",
-                   "YOUTUBE_COOKIES", "TWITCH_CLIENT_SECRET"}
+                   "YOUTUBE_COOKIES", "TWITCH_CLIENT_SECRET", "NTFY_TOPIC"}
     masked = {}
     for k, v in config.items():
         if k in secret_keys and v:
@@ -114,6 +114,20 @@ async def get_config(request: Request):
         else:
             masked[k] = v
     return masked
+
+
+@router.post("/api/notify/test")
+async def send_test_notification(request: Request):
+    """Send a test phone notification to the saved ntfy topic."""
+    require_trusted_config_request(request)
+    from clippyme.integrations.notifier import configured_topic, send
+    if not configured_topic():
+        raise HTTPException(status_code=400, detail="No ntfy topic saved")
+    sent = await asyncio.to_thread(
+        send, "ClippyMe is connected",
+        "Phone notifications work. You'll get one when a monitor finds new clips.",
+        tags=("white_check_mark",))
+    return {"sent": sent}
 
 
 @router.post("/api/config")
