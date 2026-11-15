@@ -210,6 +210,24 @@ def remaining_prelive(prelive_skip_seconds: int, started_at, now) -> int:
     return max(0, int(prelive_skip_seconds - elapsed))
 
 
+# Queued clips listed in a monitor's status for review; the count is always exact.
+MAX_PENDING_LISTED = 50
+
+
+def pending_clip_summary(entry: dict) -> dict:
+    """Public fields of one queued publication for the dashboard (no paths)."""
+    clip = entry.get("clip") or {}
+    return {
+        "publication_id": entry.get("publication_id"),
+        "job_id": entry.get("job_id"),
+        "original_index": clip.get("original_index"),
+        "title": clip.get("title") or "",
+        "viral_score": clip.get("viral_score"),
+        "video_url": clip.get("video_url") or "",
+        "state": entry.get("state") or "queued",
+    }
+
+
 def render_template(template: str, clip: dict) -> str:
     """Fill ``{title}`` / ``{hook}`` placeholders from a clip dict.
 
@@ -789,6 +807,8 @@ class LiveMonitor:
             "resume_on_start": self.resume_on_start,
             "publishing_enabled": self.publishing_enabled,
             "pending_publish": len(self._pending_publish),
+            "pending_clips": [pending_clip_summary(e)
+                              for e in self._pending_publish[:MAX_PENDING_LISTED]],
             "failed_publish": len(self._failed_publish),
             "gemini_exhausted_at": self._gemini_exhausted_at,
             # Same allow-list snapshot() persists — no secrets by construction
@@ -847,7 +867,8 @@ class LiveMonitor:
             except (KeyError, TypeError, ValueError):
                 self._published_at[key] = now
         self.publishing_enabled = bool(snap.get("publishing_enabled", True))
-        self._pending_publish = [e for e in snap.get("pending_publish") or []
+        self._pending_publish = [self._as_publication(e)
+                                 for e in snap.get("pending_publish") or []
                                  if isinstance(e, dict)]
         self._failed_publish = [e for e in snap.get("failed_publish") or []
                                 if isinstance(e, dict)]
@@ -1844,6 +1865,8 @@ class LiveMonitor:
         # artifact cleanup, like a manual publish (lock order: clip lock, then
         # the global publish lock).
         async with self._clip_lock(job_id, clip):
+            if self._queue_index(entry) is None:
+                return  # discarded while waiting for the clip lock
             try:
                 upload_path = entry.get("composed_path")
                 if not upload_path or not os.path.isfile(upload_path):
@@ -2044,6 +2067,30 @@ class LiveMonitor:
         return {"publishing_enabled": self.publishing_enabled,
                 "pending_publish": len(self._pending_publish)}
 
+    def discard_publication(self, publication_id: str) -> dict:
+        """Drop one queued clip so it is never auto-published.
+
+        Synchronous on purpose: the check and the removal run without an
+        await, so no drain can start publishing the entry in between. An
+        entry already in flight is refused (Zernio may be accepting it). The
+        clip itself stays in its job, visible in History for manual use; only
+        the monitor's composed copy is deleted.
+        """
+        entry = next((e for e in self._pending_publish
+                      if e.get("publication_id") == publication_id), None)
+        if entry is None:
+            raise NotFoundError(f"no queued clip {publication_id}")
+        if entry.get("state") == "in_flight":
+            raise ConflictError("clip is being published right now")
+        self._dequeue(entry)
+        self._persist()
+        composed = entry.get("composed_path") or ""
+        if composed and os.path.dirname(os.path.abspath(composed)) == os.path.abspath(self._clip_dir):
+            _safe_remove(composed)
+        logger.info("LiveMonitor %s: discarded queued clip %s (%s/%s)", self.id, publication_id,
+                    entry.get("job_id"), (entry.get("clip") or {}).get("original_index"))
+        return {"discarded": publication_id, "pending_publish": len(self._pending_publish)}
+
     async def _drain_pending(self) -> None:
         """Single consumer of the durable publish queue.
 
@@ -2071,6 +2118,8 @@ class LiveMonitor:
                     await asyncio.sleep(PUBLISH_SPACING_SECONDS)
                     if self._stop.is_set() or not self.publishing_enabled:
                         break
+                    if self._queue_index(entry) is None:
+                        continue  # discarded during the spacing sleep
                 first = False
                 try:
                     await self._publish_one(entry)
@@ -2338,6 +2387,13 @@ class LiveMonitorRegistry:
         result = mon.set_publishing(enabled)
         self.persist()
         return result
+
+    def discard_publication(self, monitor_id: str, publication_id: str) -> dict:
+        """Remove one queued clip from a monitor's publish queue."""
+        mon = self._monitors.get(monitor_id)
+        if mon is None:
+            raise NotFoundError(f"no such monitor: {monitor_id}")
+        return mon.discard_publication(publication_id)
 
     def publication_owner(self, job_id: str, clip_index: int) -> str | None:
         """Id of the monitor that still owns this clip's automatic publication

@@ -57,8 +57,9 @@ worth knowing (full list: [docs/architecture/live-monitor.md](docs/architecture/
   segment posts nothing. Prefer it over `fixed`, which always posts the top 5.
 - **Spacing** between posts is 15 minutes across all monitors. There is no
   daily cap, so set one yourself by limiting `max_clips`.
-- **Publishing can be paused** per monitor. Start paused, review what it
-  picks for a few days, then turn auto-publish on.
+- **Publishing can be paused** per monitor. While paused, waiting clips show
+  under the monitor with a preview. Click **Discard** on the bad ones, then
+  turn auto-publish on to post the rest.
 
 ## 4. Before you post anything
 

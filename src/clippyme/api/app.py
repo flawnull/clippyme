@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import uuid
 import shutil
@@ -184,6 +185,9 @@ async def lifespan(app: FastAPI):
             pass
         except Exception:
             logger.exception("background task raised during shutdown")
+
+# A monitor publication id is a uuid4 (LiveMonitor._as_publication).
+_PUBLICATION_ID_RE = re.compile(r"[0-9a-fA-F-]{8,64}")
 
 app = FastAPI(lifespan=lifespan)
 
@@ -929,6 +933,17 @@ async def live_monitor_set_publishing(monitor_id: str, request: Request):
         raise HTTPException(
             status_code=422, detail=exc.errors(include_context=False))
     return {"monitor": live_monitor.set_publishing(monitor_id, req.enabled)}
+
+
+@app.post("/api/live-monitor/{monitor_id}/pending/{publication_id}/discard")
+async def live_monitor_discard_pending(monitor_id: str, publication_id: str, request: Request):
+    """Drop one queued clip so the monitor never auto-publishes it. The clip
+    stays in its job (History); 409 while it is being published."""
+    require_trusted_config_request(request)
+    enforce_rate_limit(request, "livemonitor", capacity=10, refill_per_sec=10 / 60)
+    if not _PUBLICATION_ID_RE.fullmatch(publication_id):
+        raise HTTPException(status_code=400, detail="invalid publication id")
+    return live_monitor.discard_publication(monitor_id, publication_id)
 
 
 @app.get("/api/live-monitor/status")

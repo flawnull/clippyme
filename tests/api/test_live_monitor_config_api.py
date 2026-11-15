@@ -97,3 +97,36 @@ def test_stop_malformed_json_400():
 
     assert r.status_code == 400, r.text
     assert app_module.live_monitor._monitors["kick:foo"] is fake
+
+
+class _QueueMonitor(_FakeMonitor):
+    def discard_publication(self, publication_id):
+        from clippyme.core.errors import ConflictError, NotFoundError
+        if publication_id == "11111111-1111-1111-1111-111111111111":
+            raise ConflictError("clip is being published right now")
+        if publication_id != "22222222-2222-2222-2222-222222222222":
+            raise NotFoundError("no queued clip")
+        return {"discarded": publication_id, "pending_publish": 0}
+
+
+def test_discard_pending_clip_routes():
+    app_module.live_monitor._monitors["kick:foo"] = _QueueMonitor()
+    client = TestClient(app_module.app, headers=ORIGIN)
+    base = "/api/live-monitor/kick:foo/pending"
+
+    ok = client.post(f"{base}/22222222-2222-2222-2222-222222222222/discard")
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["pending_publish"] == 0
+    assert client.post(f"{base}/11111111-1111-1111-1111-111111111111/discard").status_code == 409
+    assert client.post(f"{base}/33333333-3333-3333-3333-333333333333/discard").status_code == 404
+    assert client.post(f"{base}/not..valid/discard").status_code in (400, 404)
+    assert client.post(
+        "/api/live-monitor/kick:nope/pending/22222222-2222-2222-2222-222222222222/discard"
+    ).status_code == 404
+
+
+def test_discard_pending_clip_untrusted_origin_rejected():
+    app_module.live_monitor._monitors["kick:foo"] = _QueueMonitor()
+    client = TestClient(app_module.app, headers={"Origin": "https://evil.example"})
+    r = client.post("/api/live-monitor/kick:foo/pending/22222222-2222-2222-2222-222222222222/discard")
+    assert r.status_code in (403, 400)

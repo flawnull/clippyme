@@ -412,6 +412,20 @@ export async function setMonitorPublishing(monitorId, enabled) {
   return res.json();
 }
 
+// Drop one queued clip from a monitor's auto-publish queue. The clip stays in
+// its job (History). 409 while it is being published.
+export async function discardPendingClip(monitorId, publicationId) {
+  const res = await apiFetch(getApiUrl(
+    `/api/live-monitor/${encodeURIComponent(monitorId)}/pending/${encodeURIComponent(publicationId)}/discard`), {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 // Map the Create flow's flat `opts` into the preselections shape the existing
 // hooks + seedClipParams expect (subtitles/hook as truthy objects).
 export function optsToPreselections(opts) {

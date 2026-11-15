@@ -16,6 +16,7 @@ vi.mock('../../api/client', () => ({
   getLiveMonitorStatus: (...args) => mockStatus(...args),
   updateMonitorConfig: vi.fn(async () => ({ monitor: {} })),
   setMonitorPublishing: vi.fn(async () => ({ publishing_enabled: true })),
+  discardPendingClip: vi.fn(async () => ({ discarded: 'p-1', pending_publish: 1 })),
   listFonts: vi.fn(async () => ({ fonts: [] })),
 }));
 
@@ -368,4 +369,36 @@ test('twitch missing-credentials (400) points to Settings', async () => {
   await waitFor(() => expect(screen.getByRole('button', { name: /Start monitor/ })).not.toBeDisabled());
   fireEvent.click(screen.getByRole('button', { name: /Start monitor/ }));
   await waitFor(() => expect(pushToast).toHaveBeenCalledWith('error', expect.stringMatching(/Twitch not configured/i)));
+});
+
+test('queued clips are listed with a Discard button that calls the API', async () => {
+  const client = await import('../../api/client');
+  mockStatus.mockResolvedValue({
+    monitors: [{ id: 'kick:n3on', platform: 'kick', mode: 'live', running: true, state: 'capturing',
+      channel: 'n3on', publishing_enabled: false, pending_publish: 3,
+      pending_clips: [
+        { publication_id: 'p-1', title: 'Chat goes wild', viral_score: 88, state: 'queued',
+          video_url: '/videos/j1/clip_0.mp4' },
+        { publication_id: 'p-2', title: 'Mid-upload', viral_score: 75, state: 'in_flight',
+          video_url: '/videos/j1/clip_1.mp4' },
+      ] }],
+  });
+  render(<LiveMonitorView />);
+  expect(await screen.findByText('Chat goes wild')).toBeInTheDocument();
+  expect(screen.getByText('Score 88')).toBeInTheDocument();
+  expect(screen.getByText('+1 more queued')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Discard Mid-upload' })).toBeDisabled();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Discard Chat goes wild' }));
+  await waitFor(() => expect(client.discardPendingClip).toHaveBeenCalledWith('kick:n3on', 'p-1'));
+});
+
+test('no queued-clips section when nothing is waiting', async () => {
+  mockStatus.mockResolvedValue({
+    monitors: [{ id: 'kick:n3on', platform: 'kick', mode: 'live', running: true, state: 'capturing',
+      channel: 'n3on', publishing_enabled: false, pending_publish: 0, pending_clips: [] }],
+  });
+  render(<LiveMonitorView />);
+  await screen.findByText('n3on');
+  expect(screen.queryByText(/Queued to publish/)).not.toBeInTheDocument();
 });
