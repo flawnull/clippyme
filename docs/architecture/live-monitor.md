@@ -36,9 +36,21 @@ again automatically.
   optional `letterbox_zoom`), a full-clip hook, the attribution banner attached
   under the video band, and subtitles; `smart_cut` is opt-in. All overridable
   per monitor.
+- **Chat signal** (`chat_signal`, default on, Kick and Twitch `live` mode):
+  while a segment is captured, `integrations/chat_listener.py` reads the
+  channel's chat anonymously (read-only; nothing is ever sent). When the
+  segment is submitted, `monitoring/chat_signal.py` bins the messages into
+  10-second buckets, weighting reaction messages (KEKW, `????`, W) double, and
+  marks buckets at 2.5x the segment's median and at least 8 weight as spikes.
+  Up to five spike windows, each starting 20 s early to include the build-up,
+  are appended to the segment's AI instructions as a hint. Gemini still picks
+  the clips; the hint only points it at moments the transcript can miss. A
+  quiet chat (under 30 messages), a connection failure or a format change
+  yields no hint, and the segment is clipped as before. Backfill segments
+  carry no hint, since their chat was not recorded.
 - **Runtime config**: `POST /api/live-monitor/{id}/config` changes an
   allow-listed set of fields (templates, instructions, spacing, segment
-  length, platforms, look); changes apply to future clips. Platform, mode and
+  length, platforms, look, chat signal); changes apply to future clips. Platform, mode and
   channel need a new monitor.
 
 ## Publishing flow
