@@ -8,7 +8,7 @@ import { Icon, Panel, Btn, Badge, Switch, Segmented, PlatPill, PLATFORMS } from 
 import { getZernio, startLiveMonitor, stopLiveMonitor, updateMonitorConfig, setMonitorPublishing, discardPendingClip } from '../../api/client';
 import { getApiUrl } from '../../api/config';
 import { PLAT } from '../publishing/publish';
-import { validateSlug, buildPlatformTargets, classifyStartError, clampMonitorTimings, clipSelectionPayload, zoomToPercent, LETTERBOX_ZOOM_PERCENTS } from './liveMonitorForm';
+import { validateSlug, buildPlatformTargets, classifyStartError, clampMonitorTimings, clampPostsPerDay, clipSelectionPayload, zoomToPercent, LETTERBOX_ZOOM_PERCENTS } from './liveMonitorForm';
 import { buildMonitorBannerPayload } from './liveMonitorBanner';
 import { toComposeSubtitleParams, fromComposeSubtitleParams } from './subtitleComposeParams';
 import { BannerControls } from '../../components/controls/bannerControls';
@@ -31,6 +31,13 @@ const SUB_DEFAULTS = {
 // picture is bigger and the bars smaller.
 const ZOOM_OPTIONS = LETTERBOX_ZOOM_PERCENTS.map(
   (p) => ({ id: String(p), label: p ? `${p}%` : 'No zoom' }));
+
+// When finished clips go out: inside prime-time windows (can be hours later)
+// or as soon as the minimum gap allows (never 01:00-08:00).
+const POST_TIMING_OPTIONS = [
+  { id: 'prime_time', label: 'Prime time' },
+  { id: 'asap', label: 'As soon as possible' },
+];
 
 // The start form is long enough that a lone "Min gap" or platform picker reads
 // without context. Grouping by what a field steers — what gets captured, how
@@ -104,6 +111,11 @@ function MonitorSettings({ monitor, onApply, applying }) {
   const [smartCutTouched, setSmartCutTouched] = useState(false);
   const [zoom, setZoom] = useState(zoomToPercent(cfg.letterbox_zoom));
   const [zoomTouched, setZoomTouched] = useState(false);
+  const [postTiming, setPostTiming] = useState(cfg.post_timing === 'asap' ? 'asap' : 'prime_time');
+  const [postTimingTouched, setPostTimingTouched] = useState(false);
+  const [maxPerDay, setMaxPerDay] = useState(typeof cfg.max_posts_per_day === 'number' ? String(cfg.max_posts_per_day) : '');
+  const [chatSignal, setChatSignal] = useState(cfg.chat_signal !== false);
+  const [chatSignalTouched, setChatSignalTouched] = useState(false);
 
   const apply = () => {
     const partial = {};
@@ -121,6 +133,9 @@ function MonitorSettings({ monitor, onApply, applying }) {
     if (minScore !== '') partial.min_viral_score = bounded.min_viral_score;
     if (smartCutTouched) partial.smart_cut = smartCut;
     if (zoomTouched) partial.letterbox_zoom = zoom;
+    if (postTimingTouched) partial.post_timing = postTiming;
+    if (maxPerDay !== '') partial.max_posts_per_day = clampPostsPerDay(maxPerDay);
+    if (chatSignalTouched) partial.chat_signal = chatSignal;
     onApply(monitor.id, partial);
   };
 
@@ -195,6 +210,23 @@ function MonitorSettings({ monitor, onApply, applying }) {
         <Segmented full value={String(zoom)}
           onChange={(v) => { setZoom(Number(v)); setZoomTouched(true); }}
           options={ZOOM_OPTIONS} />
+      </div>
+      <div className="field">
+        <span className="field-label">Post timing</span>
+        <Segmented full value={postTiming}
+          onChange={(v) => { setPostTiming(v); setPostTimingTouched(true); }}
+          options={POST_TIMING_OPTIONS} />
+      </div>
+      <label className="field">
+        <span className="field-label">Max posts per day</span>
+        <input className="key-input" type="number" min="0" max="100" aria-label={`Settings max posts per day ${monitor.id}`}
+          value={maxPerDay} onChange={(e) => setMaxPerDay(e.target.value)} />
+        <div className="od">0 = no limit. Counts posts from every monitor.</div>
+      </label>
+      <div className="opt" style={{ borderBottom: 0, paddingLeft: 0, paddingRight: 0 }}>
+        <div className="otxt"><div className="ot">Chat signal</div><div className="od">Points the AI at moments where chat explodes</div></div>
+        <Switch on={chatSignal} label={`Chat signal ${monitor.id}`}
+          onChange={(on) => { setChatSignal(on); setChatSignalTouched(true); }} />
       </div>
       <div className="opt" style={{ borderBottom: 0, paddingLeft: 0, paddingRight: 0 }}>
         <div className="otxt"><div className="ot">Delete clip after publish</div><div className="od">Frees disk once a clip is confirmed published</div></div>
@@ -320,6 +352,9 @@ export function LiveMonitorView({ pushToast }) {
   const [segmentMin, setSegmentMin] = useState(30);
   const [preliveMin, setPreliveMin] = useState(30);
   const [minGapMin, setMinGapMin] = useState(15);
+  const [postTiming, setPostTiming] = useState('prime_time');
+  const [maxPerDay, setMaxPerDay] = useState(0);
+  const [chatSignal, setChatSignal] = useState(true);
   const [catchup, setCatchup] = useState('backfill');
   const [clipSelection, setClipSelection] = useState('fixed');
   const [maxClips, setMaxClips] = useState(5);
@@ -364,6 +399,9 @@ export function LiveMonitorView({ pushToast }) {
         catchup,
         smart_cut: smartCut,
         letterbox_zoom: zoom,
+        post_timing: postTiming,
+        max_posts_per_day: clampPostsPerDay(maxPerDay),
+        chat_signal: !isVod && platform !== 'youtube' ? chatSignal : false,
         caption_template: captionTemplate,
         title_template: titleTemplate,
         instructions,
@@ -560,6 +598,16 @@ export function LiveMonitorView({ pushToast }) {
           <Switch on={smartCut} label="Smart cut" onChange={setSmartCut} />
         </div>
 
+        {!isVod && (
+          <div className="opt" style={{ paddingLeft: 0, paddingRight: 0 }}>
+            <div className="otxt">
+              <div className="ot">Chat signal</div>
+              <div className="od">Reads the live chat and points the AI at moments where it explodes</div>
+            </div>
+            <Switch on={chatSignal} label="Chat signal" onChange={setChatSignal} />
+          </div>
+        )}
+
         <div className="field">
           <span className="field-label">Attribution banner</span>
           <Segmented full value={bannerMode} onChange={setBannerMode}
@@ -618,6 +666,23 @@ export function LiveMonitorView({ pushToast }) {
           <input className="key-input" type="number" min="0" max="1440" aria-label="Minimum publish gap minutes"
             value={minGapMin} onChange={(e) => setMinGapMin(e.target.value === '' ? '' : Number(e.target.value))} />
           <div className="od">Minimum spacing between two scheduled posts — shared across every running monitor.</div>
+        </label>
+
+        <div className="field">
+          <span className="field-label">Post timing</span>
+          <Segmented full value={postTiming} onChange={setPostTiming} options={POST_TIMING_OPTIONS} />
+          <div className="od">
+            {postTiming === 'asap'
+              ? 'Each clip goes out a couple of minutes after it is ready, once the min gap allows. Never 01:00-08:00.'
+              : 'Clips wait for the prime-time windows of the day, which can be hours later.'}
+          </div>
+        </div>
+
+        <label className="field">
+          <span className="field-label">Max posts per day</span>
+          <input className="key-input" type="number" min="0" max="100" aria-label="Max posts per day"
+            value={maxPerDay} onChange={(e) => setMaxPerDay(e.target.value === '' ? '' : Number(e.target.value))} />
+          <div className="od">0 = no limit. Counts posts from every monitor; extra clips move to the next day.</div>
         </label>
 
         <div className="field">

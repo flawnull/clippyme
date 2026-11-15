@@ -1,7 +1,7 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
 
-import { validateSlug, buildPlatformTargets, classifyStartError, clampMonitorTimings, clipSelectionPayload } from './liveMonitorForm.js';
+import { validateSlug, buildPlatformTargets, classifyStartError, clampMonitorTimings, clampPostsPerDay, clipSelectionPayload } from './liveMonitorForm.js';
 
 test('validateSlug: kick/twitch required, charset, length', () => {
   assert.equal(validateSlug(''), 'Channel is required');
@@ -109,4 +109,12 @@ test('clipSelectionPayload: fixed vs auto, bounds and garbage input', () => {
   assert.deepEqual(clipSelectionPayload('auto', '', 'x'), {
     clip_selection: 'auto', max_clips: 5, min_viral_score: 70,
   });
+});
+
+test('clampPostsPerDay bounds the daily cap and treats blank as no cap', () => {
+  assert.equal(clampPostsPerDay(''), 0);
+  assert.equal(clampPostsPerDay('6'), 6);
+  assert.equal(clampPostsPerDay(250), 100);
+  assert.equal(clampPostsPerDay(-3), 0);
+  assert.equal(clampPostsPerDay('abc'), 0);
 });

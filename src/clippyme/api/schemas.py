@@ -402,6 +402,10 @@ class LiveMonitorStartRequest(BaseModel):
     letterbox_zoom: float = Field(0, ge=0, le=15)
     # Record live chat during each segment and hint its spikes to Gemini.
     chat_signal: bool = True
+    # "prime_time" schedules inside prime-time windows; "asap" posts as soon
+    # as min_gap_seconds allows. max_posts_per_day: 0 = no cap.
+    post_timing: str = Field("prime_time", pattern=r"^(prime_time|asap)$")
+    max_posts_per_day: int = Field(0, ge=0, le=100)
 
     @field_validator("timezone")
     @classmethod

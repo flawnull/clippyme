@@ -53,6 +53,13 @@ export function clampMonitorTimings(segmentMin, preliveMin, minGapMin) {
   };
 }
 
+// Daily post cap for the payload: 0-100 whole posts, '' or junk = 0 (no cap).
+export function clampPostsPerDay(value) {
+  if (value === '' || value === null || value === undefined) return 0;
+  const n = Math.round(Number(value));
+  return Number.isFinite(n) ? Math.min(100, Math.max(0, n)) : 0;
+}
+
 // Build the clip-selection payload (how many clips a segment publishes).
 // "fixed" always takes the top `maxClips` by viral_score; "auto" keeps only
 // clips scoring at least `minScore` — a weak segment then publishes fewer
