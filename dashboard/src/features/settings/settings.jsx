@@ -8,8 +8,10 @@ import {
   getConfig, saveConfig, getModels, cookiesStatus, uploadCookies, deleteCookies,
   getZernio, saveZernio, discoverZernioAccounts,
   listFonts, uploadFont, deleteFont, logoStatus, uploadLogo, deleteLogo,
+  sendTestNotification,
 } from '../../api/client';
 import { SUB_FONTS } from '../../lib/uiOptions';
+import { generateNtfyTopic } from '../../lib/ntfyTopic';
 import { getApiToken, setApiToken } from '../../api/apiToken';
 import { getCredentialMode, setCredentialMode } from '../../lib/credentialStorage';
 
@@ -59,6 +61,9 @@ export function SettingsView({ apiKey, onApiKey, cookiesConfigured, onCookiesCha
   const [hf, setHf] = useState('');
   const [twitchId, setTwitchId] = useState('');
   const [twitchSecret, setTwitchSecret] = useState('');
+  const [ntfyTopic, setNtfyTopic] = useState('');
+  const [newTopic, setNewTopic] = useState('');
+  const [testingNotify, setTestingNotify] = useState(false);
   const [apiToken, setApiTokenState] = useState(() => getApiToken());
   const [browserRetention, setBrowserRetention] = useState(() => getCredentialMode());
   const [present, setPresent] = useState({});
@@ -99,7 +104,7 @@ export function SettingsView({ apiKey, onApiKey, cookiesConfigured, onCookiesCha
     if (!c) { pushToast?.('warn', 'Could not refresh key status'); return; }
     setPresent({
       gemini: !!c.GEMINI_API_KEY, hf: !!c.HF_TOKEN, deepgram: !!c.DEEPGRAM_API_KEY, elevenlabs: !!c.ELEVENLABS_API_KEY,
-      twitchId: !!c.TWITCH_CLIENT_ID, twitchSecret: !!c.TWITCH_CLIENT_SECRET,
+      twitchId: !!c.TWITCH_CLIENT_ID, twitchSecret: !!c.TWITCH_CLIENT_SECRET, ntfy: !!c.NTFY_TOPIC,
     });
     if (c.TRANSCRIPTION_PROVIDER) setProvider(c.TRANSCRIPTION_PROVIDER);
     if (c.GEMINI_MODEL) setModel(c.GEMINI_MODEL);
@@ -118,6 +123,25 @@ export function SettingsView({ apiKey, onApiKey, cookiesConfigured, onCookiesCha
   const saveKeys = async (patch) => {
     try { await saveConfig(patch); pushToast?.('success', 'Saved'); await refreshConfig(); }
     catch { pushToast?.('error', 'Save failed'); }
+  };
+
+  const generateTopic = async () => {
+    const topic = generateNtfyTopic();
+    setNtfyTopic(topic);
+    setNewTopic(topic);
+    await saveKeys({ NTFY_TOPIC: topic });
+  };
+
+  const testNotify = async () => {
+    setTestingNotify(true);
+    try {
+      const { sent } = await sendTestNotification();
+      pushToast?.(sent ? 'success' : 'warn', sent ? 'Test sent. Check your phone.' : 'ntfy did not accept it. Try again in a minute.');
+    } catch (e) {
+      pushToast?.('error', 'Test failed: ' + String(e.message || e).slice(0, 60));
+    } finally {
+      setTestingNotify(false);
+    }
   };
 
   const saveZernioCfg = async () => {
@@ -221,6 +245,26 @@ export function SettingsView({ apiKey, onApiKey, cookiesConfigured, onCookiesCha
         <KeyRow icon="rss" name="Twitch client secret" desc="Live Monitor: Twitch channel detection" value={twitchSecret} present={present.twitchSecret}
           onChange={setTwitchSecret} onSave={() => saveKeys({ TWITCH_CLIENT_SECRET: twitchSecret })}
           onClear={() => { setTwitchSecret(''); saveKeys({ TWITCH_CLIENT_SECRET: '' }); }} placeholder="Helix app client secret" />
+        <KeyRow icon="bell" name="Phone notifications (ntfy topic)" desc="Get a push when a monitor finds new clips or a post fails" value={ntfyTopic} present={present.ntfy}
+          onChange={setNtfyTopic} onSave={() => saveKeys({ NTFY_TOPIC: ntfyTopic.trim() })}
+          onClear={() => { setNtfyTopic(''); setNewTopic(''); saveKeys({ NTFY_TOPIC: '' }); }} placeholder="clippyme-… (use Generate)" />
+        <div className="opt" style={{ borderBottom: 0 }}>
+          <div className="oico"><Icon n="smartphone" /></div>
+          <div className="otxt">
+            <div className="ot">Set up notifications</div>
+            <div className="od">
+              {newTopic
+                ? <>Install the free ntfy app, tap <b>+</b>, and subscribe to <code>{newTopic}</code>. Keep this name private.</>
+                : 'Generate a private topic, subscribe to it in the free ntfy app, then send a test.'}
+            </div>
+          </div>
+          <div className="r">
+            <Btn variant="secondary" size="sm" icon="shuffle" onClick={generateTopic}>Generate</Btn>
+            <Btn variant="secondary" size="sm" icon="send" disabled={!present.ntfy || testingNotify} onClick={testNotify}>
+              {testingNotify ? 'Sending…' : 'Send test'}
+            </Btn>
+          </div>
+        </div>
         <KeyRow icon="key-round" name="API token" desc="Only for LAN deploys with CLIPPYME_API_TOKEN set — stored in this browser, sent as X-API-Token" value={apiToken} present={!!getApiToken()}
           onChange={setApiTokenState} onSave={() => { setApiToken(apiToken); pushToast?.('success', apiToken.trim() ? 'API token saved' : 'API token cleared'); }} placeholder="Shared secret (leave empty + Save to clear)" />
         <div className="opt" style={{ borderBottom: 0 }}>

@@ -67,6 +67,18 @@ worth knowing (full list: [docs/architecture/live-monitor.md](docs/architecture/
   under the monitor with a preview. Click **Discard** on the bad ones, then
   turn auto-publish on to post the rest.
 
+## Phone notifications
+
+1. Install the free **ntfy** app (iPhone or Android).
+2. In ClippyMe **Settings**, find **Phone notifications** and click
+   **Generate**. It saves a private topic name and shows it once.
+3. In the ntfy app, tap **+** and subscribe to that exact name.
+4. Click **Send test**. Your phone should buzz.
+
+You'll get a notification when a monitor finds new clips (with the time they
+post) and when a clip fails to post. Keep the topic name private: anyone who
+knows it can read your notifications.
+
 ## 4. Before you post anything
 
 - Only clip streamers who allow it. Join their clipping program (Discord,

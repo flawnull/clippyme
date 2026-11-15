@@ -1931,12 +1931,33 @@ class LiveMonitor:
         return max(float(entry.get("next_retry_at") or 0),
                    float(entry.get("review_until") or 0))
 
+    def _notify(self, title: str, message: str, *, tags=(), priority: int = 3) -> None:
+        """Fire-and-forget phone notification (integrations/notifier.py).
+        No-op without a running loop or a saved ntfy topic; never raises."""
+        from clippyme.integrations import notifier
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self._track_task(loop.create_task(asyncio.to_thread(
+            notifier.send, title, message, tags=tuple(tags), priority=priority)))
+
     def _enqueue_publications(self, entries: list[dict]) -> None:
         """Durably queue finished clips, then make sure the drain runs."""
+        fresh = []
         for entry in entries:
+            if "queued_at" not in entry:
+                fresh.append(entry)
             self._start_review(entry)
             self._ensure_queued(self._as_publication(entry))
         self._persist()
+        if fresh:
+            from clippyme.integrations.notifier import new_clips_message
+            title, message = new_clips_message(
+                self.cfg.get("channel") or self.id, [e.get("clip") or {} for e in fresh],
+                review_minutes=int(self.cfg.get("review_minutes") or 0),
+                publishing_enabled=self.publishing_enabled)
+            self._notify(title, message, tags=("movie_camera",))
         if entries and self.publishing_enabled and not self._draining:
             try:
                 self._track_task(asyncio.create_task(self._drain_pending()))
@@ -2122,6 +2143,9 @@ class LiveMonitor:
             logger.error("LiveMonitor %s: publish failed permanently for %s after %d "
                          "attempt(s): %s (body=%r)", self.id, clip_path,
                          entry["attempts"], exc, body)
+            clip_title = (entry.get("clip") or {}).get("title") or "A clip"
+            self._notify(f"Clip failed to post · {self.cfg.get('channel') or self.id}",
+                         f"{clip_title}\n{str(exc)[:200]}", tags=("warning",), priority=4)
         self._persist()
 
     async def _on_publish_accepted(self, entry: dict, clip_path: str, result: dict | None) -> None:

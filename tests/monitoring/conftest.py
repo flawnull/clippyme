@@ -12,3 +12,17 @@ def instant_publish_defaults(monkeypatch):
     monkeypatch.setattr(lm, "DEFAULT_REVIEW_MINUTES", 0)
     monkeypatch.setattr(lm, "DEFAULT_MAX_POSTS_PER_DAY", 0)
     monkeypatch.setattr(lm, "DEFAULT_POST_TIMING", "prime_time")
+
+
+@pytest.fixture(autouse=True)
+def sent_notifications(monkeypatch):
+    """Never send a real phone notification from a test; record them instead."""
+    from clippyme.integrations import notifier
+    sent = []
+
+    def fake_send(title, message, *, tags=(), priority=3, topic=None):
+        sent.append({"title": title, "message": message, "tags": tags, "priority": priority})
+        return True
+
+    monkeypatch.setattr(notifier, "send", fake_send)
+    return sent

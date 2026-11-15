@@ -246,6 +246,14 @@ export async function saveConfig(keys) {
   return res.json().catch(() => ({}));
 }
 
+// Send a test phone notification to the saved ntfy topic.
+export async function sendTestNotification() {
+  const res = await apiFetch(getApiUrl('/api/notify/test'), { method: 'POST' });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.detail || `HTTP ${res.status}`);
+  return body; // { sent }
+}
+
 export async function getModels(apiKey) {
   const res = await apiFetch(getApiUrl('/api/config/models'), { headers: { 'X-Gemini-Key': apiKey } });
   if (!res.ok) return { models: [] };
