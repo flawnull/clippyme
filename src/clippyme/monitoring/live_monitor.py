@@ -450,7 +450,11 @@ def _letterbox_zoom_or_zero(value) -> float:
         return 0.0
 
 
-def _validate_bool(value, field: str) -> bool:
+def _validate_bool(value, field: str, default: bool | None = None) -> bool:
+    # A monitor saved before a field existed persists it as None (snapshot()
+    # writes every _SNAPSHOT_CONFIG_FIELDS key); read that as the default.
+    if value is None and default is not None:
+        return default
     if not isinstance(value, bool):
         raise ValidationError(f"{field} must be a boolean")
     return value
@@ -520,8 +524,7 @@ def validate_monitor_config(config: dict, default_timezone: str = "Europe/Rome")
         # Whether a confirmed Zernio publish deletes the job's raw clip
         # artifacts. Default ON (frees disk); flip off to keep them for
         # manual QA/re-edit at the cost of storage.
-        "delete_after_publish": _validate_bool(
-            config.get("delete_after_publish", True), "delete_after_publish"),
+        "delete_after_publish": _validate_bool(config.get("delete_after_publish"), "delete_after_publish", default=True),
         # Max clips kept per segment (top-N by viral_score) — bounds a
         # publish-limited monitor's output. Default 5; 0 = NO cap (every clip
         # the segment yields gets published). In "auto" selection it stays the
@@ -535,14 +538,14 @@ def validate_monitor_config(config: dict, default_timezone: str = "Europe/Rome")
         # Burn Smart Cut (silence/filler removal) into every clip before
         # publishing. Off by default: it re-renders each clip, and a stream
         # segment with clean pacing gains nothing from it.
-        "smart_cut": _validate_bool(config.get("smart_cut", False), "smart_cut"),
+        "smart_cut": _validate_bool(config.get("smart_cut"), "smart_cut", default=False),
         # Fixed zoom on the letterbox render (monitors always run reframe
         # 'disabled'). 0 = whole frame between the bars, else 0.05-0.15.
         "letterbox_zoom": _letterbox_zoom_or_zero(config.get("letterbox_zoom")),
         # Record live chat during each segment and pass its spikes to Gemini
         # as a hint (monitoring/chat_signal.py). Kick and Twitch live mode only;
         # a chat failure never blocks the segment.
-        "chat_signal": _validate_bool(config.get("chat_signal", True), "chat_signal"),
+        "chat_signal": _validate_bool(config.get("chat_signal"), "chat_signal", default=True),
         # "prime_time" (default) schedules inside SmartScheduler's windows;
         # "asap" posts as soon as min_gap_seconds allows (SharedGapScheduler).
         "post_timing": _validate_post_timing(config.get("post_timing")),
