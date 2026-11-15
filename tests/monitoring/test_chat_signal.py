@@ -247,3 +247,19 @@ def test_no_recorder_when_chat_signal_is_off_or_strategy_has_no_chat(tmp_path):
     mon = _monitor(tmp_path)
     mon._strategy = object()  # e.g. YouTube, or a test double
     assert mon._start_chat_recorder() is None
+
+
+def test_segment_job_dir_gets_the_chat_spikes_for_the_fallback(tmp_path):
+    from clippyme.pipeline.analysis.chat_fallback import read_spikes
+    mon = _monitor(tmp_path)
+    seg = tmp_path / "seg.mp4"
+    seg.write_bytes(b"segment")
+    mon._remember_chat_hint(str(seg), _steady_chat(1800) + _burst(600, 20, 6, "OMEGALUL"), 1800)
+
+    async def submit():
+        mon._job_queue = asyncio.Queue()
+        return await mon._submit_segment_job(str(seg))
+
+    job_id = asyncio.run(submit())
+    saved = read_spikes(mon._jobs[job_id]["output_dir"])
+    assert len(saved) == 1 and saved[0]["reaction"] == "laugh"

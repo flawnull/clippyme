@@ -213,6 +213,28 @@ def _max_clips_from_env() -> int | None:
         return None
 
 
+def _chat_spike_fallback(output_dir: str, transcript: dict, duration: float) -> dict | None:
+    """Clips from the monitor's recorded chat spikes, with the same top-N and
+    score floor a Gemini result gets, or None when there is nothing usable."""
+    from clippyme.pipeline.analysis.chat_fallback import build_chat_spike_clips, read_spikes
+
+    spikes = read_spikes(output_dir)
+    if not spikes:
+        return None
+    try:
+        floor = int(os.getenv("CLIPPYME_MIN_VIRAL_SCORE", "0") or 0)
+    except ValueError:
+        floor = 0
+    clips = build_chat_spike_clips(
+        spikes, transcript, duration, max_clips=_max_clips_from_env() or 0,
+        creator=os.getenv("CLIPPYME_CREATOR_NAME") or None)
+    shorts = [c for c in (clips or {}).get("shorts", []) if c["viral_score"] >= floor]
+    if not shorts:
+        return None
+    print(f"💬 Gemini quota used up — {len(shorts)} clip(s) from chat spikes instead", flush=True)
+    return {"shorts": shorts, "clip_source": "chat_fallback"}
+
+
 def _transcript_cache_key(args: argparse.Namespace) -> str | None:
     """Cache slot for a URL job: the URL, plus the head trim when there is one."""
     if not args.url:
@@ -451,12 +473,14 @@ def _load_or_analyze(
                 clips_data = legacy.build_texttiling_fallback(transcript, video_title)
         if not clips_data or not clips_data.get("shorts"):
             if not should_use_fallback(args.monitor):
-                clips_data = {
-                    "shorts": [],
-                    "gemini_exhausted": bool(
-                        getattr(legacy.get_viral_clips, "_last_gemini_exhausted", False)
-                    ),
-                }
+                exhausted = bool(
+                    getattr(legacy.get_viral_clips, "_last_gemini_exhausted", False))
+                # Gemini out of quota: clip the segment's chat spikes instead of
+                # publishing nothing (pipeline/analysis/chat_fallback.py).
+                fallback = (_chat_spike_fallback(output_dir, transcript, duration)
+                            if exhausted else None)
+                clips_data = fallback or {"shorts": []}
+                clips_data["gemini_exhausted"] = exhausted
             else:
                 print("⚠️ No valid AI/topic clips; using whole-video fallback", flush=True)
                 clips_data = _whole_video_fallback(video_title, duration)

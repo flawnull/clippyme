@@ -48,6 +48,14 @@ again automatically.
   quiet chat (under 30 messages), a connection failure or a format change
   yields no hint, and the segment is clipped as before. Backfill segments
   carry no hint, since their chat was not recorded.
+- **Chat fallback when Gemini is out of quota:** the spike windows are also
+  written to `chat_spikes.json` in the segment's job directory. When every
+  Gemini model is rate-limited, the orchestrator builds clips from them
+  (`pipeline/analysis/chat_fallback.py`) instead of skipping the segment:
+  15-60 s windows around the strongest spikes, generic reaction titles and
+  hooks, scores of 72-90 by spike strength, the same `max_clips` and score
+  floor as a Gemini result, and `clip_source: chat_fallback` in the metadata.
+  They then go through the normal snapping, rendering and publishing.
 - **Runtime config**: `POST /api/live-monitor/{id}/config` changes an
   allow-listed set of fields (templates, instructions, spacing, segment
   length, platforms, look, chat signal); changes apply to future clips. Platform, mode and
