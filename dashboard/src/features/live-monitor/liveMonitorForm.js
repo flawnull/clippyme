@@ -60,6 +60,13 @@ export function clampPostsPerDay(value) {
   return Number.isFinite(n) ? Math.min(100, Math.max(0, n)) : 0;
 }
 
+// Review window for the payload: 0-1440 whole minutes, '' or junk = 0 (none).
+export function clampReviewMinutes(value) {
+  if (value === '' || value === null || value === undefined) return 0;
+  const n = Math.round(Number(value));
+  return Number.isFinite(n) ? Math.min(1440, Math.max(0, n)) : 0;
+}
+
 // Build the clip-selection payload (how many clips a segment publishes).
 // "fixed" always takes the top `maxClips` by viral_score; "auto" keeps only
 // clips scoring at least `minScore` — a weak segment then publishes fewer
@@ -99,4 +106,12 @@ export function classifyStartError(message) {
   if (/already running/i.test(m)) return 'duplicate';
   if (/twitch/i.test(m) && /credential|client_id|client_secret/i.test(m)) return 'twitch_creds';
   return 'other';
+}
+
+// "Posts in 12 min" while a clip is inside its review window.
+export function reviewLabel(reviewUntil, publishingEnabled, nowMs = Date.now()) {
+  if (typeof reviewUntil !== 'number') return '';
+  const mins = Math.ceil((reviewUntil * 1000 - nowMs) / 60000);
+  if (mins <= 0) return publishingEnabled ? ' · posting soon' : '';
+  return publishingEnabled ? ` · posts in ${mins} min` : ` · review ${mins} min`;
 }

@@ -61,6 +61,9 @@ worth knowing (full list: [docs/architecture/live-monitor.md](docs/architecture/
   clips go stale fast.
 - **Max posts per day:** set 5-8 for new accounts. It counts posts from every
   monitor, and extra clips move to the next day.
+- **Review window:** set it to 15-20 minutes and leave auto-publish on. Each
+  new clip shows under the monitor with a countdown and a **Discard** button,
+  then posts on its own. You only act on the bad ones.
 - **Publishing can be paused** per monitor. While paused, waiting clips show
   under the monitor with a preview. Click **Discard** on the bad ones, then
   turn auto-publish on to post the rest.

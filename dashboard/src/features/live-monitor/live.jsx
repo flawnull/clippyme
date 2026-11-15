@@ -8,7 +8,7 @@ import { Icon, Panel, Btn, Badge, Switch, Segmented, PlatPill, PLATFORMS } from 
 import { getZernio, startLiveMonitor, stopLiveMonitor, updateMonitorConfig, setMonitorPublishing, discardPendingClip } from '../../api/client';
 import { getApiUrl } from '../../api/config';
 import { PLAT } from '../publishing/publish';
-import { validateSlug, buildPlatformTargets, classifyStartError, clampMonitorTimings, clampPostsPerDay, clipSelectionPayload, zoomToPercent, LETTERBOX_ZOOM_PERCENTS } from './liveMonitorForm';
+import { validateSlug, buildPlatformTargets, classifyStartError, clampMonitorTimings, clampPostsPerDay, clampReviewMinutes, reviewLabel, clipSelectionPayload, zoomToPercent, LETTERBOX_ZOOM_PERCENTS } from './liveMonitorForm';
 import { buildMonitorBannerPayload } from './liveMonitorBanner';
 import { toComposeSubtitleParams, fromComposeSubtitleParams } from './subtitleComposeParams';
 import { BannerControls } from '../../components/controls/bannerControls';
@@ -116,6 +116,7 @@ function MonitorSettings({ monitor, onApply, applying }) {
   const [maxPerDay, setMaxPerDay] = useState(typeof cfg.max_posts_per_day === 'number' ? String(cfg.max_posts_per_day) : '');
   const [chatSignal, setChatSignal] = useState(cfg.chat_signal !== false);
   const [chatSignalTouched, setChatSignalTouched] = useState(false);
+  const [reviewMin, setReviewMin] = useState(typeof cfg.review_minutes === 'number' ? String(cfg.review_minutes) : '');
 
   const apply = () => {
     const partial = {};
@@ -136,6 +137,7 @@ function MonitorSettings({ monitor, onApply, applying }) {
     if (postTimingTouched) partial.post_timing = postTiming;
     if (maxPerDay !== '') partial.max_posts_per_day = clampPostsPerDay(maxPerDay);
     if (chatSignalTouched) partial.chat_signal = chatSignal;
+    if (reviewMin !== '') partial.review_minutes = clampReviewMinutes(reviewMin);
     onApply(monitor.id, partial);
   };
 
@@ -223,6 +225,12 @@ function MonitorSettings({ monitor, onApply, applying }) {
           value={maxPerDay} onChange={(e) => setMaxPerDay(e.target.value)} />
         <div className="od">0 = no limit. Counts posts from every monitor.</div>
       </label>
+      <label className="field">
+        <span className="field-label">Review window (min)</span>
+        <input className="key-input" type="number" min="0" max="1440" aria-label={`Settings review minutes ${monitor.id}`}
+          value={reviewMin} onChange={(e) => setReviewMin(e.target.value)} />
+        <div className="od">New clips wait this long so you can discard them, then post on their own. 0 = no wait.</div>
+      </label>
       <div className="opt" style={{ borderBottom: 0, paddingLeft: 0, paddingRight: 0 }}>
         <div className="otxt"><div className="ot">Chat signal</div><div className="od">Points the AI at moments where chat explodes</div></div>
         <Switch on={chatSignal} label={`Chat signal ${monitor.id}`}
@@ -262,7 +270,8 @@ function PendingClips({ monitor, onDiscard, discardingId }) {
               <div className="ot">{c.title || 'Untitled clip'}</div>
               <div className="od">
                 {typeof c.viral_score === 'number' ? `Score ${c.viral_score}` : 'No score'}
-                {busy ? ' · publishing now' : c.state === 'retry_wait' ? ' · retrying' : ''}
+                {busy ? ' · publishing now' : c.state === 'retry_wait' ? ' · retrying'
+                  : reviewLabel(c.review_until, monitor.publishing_enabled)}
               </div>
             </div>
             <Btn variant="secondary" size="sm" icon="trash-2"
@@ -355,6 +364,7 @@ export function LiveMonitorView({ pushToast }) {
   const [postTiming, setPostTiming] = useState('prime_time');
   const [maxPerDay, setMaxPerDay] = useState(0);
   const [chatSignal, setChatSignal] = useState(true);
+  const [reviewMin, setReviewMin] = useState(0);
   const [catchup, setCatchup] = useState('backfill');
   const [clipSelection, setClipSelection] = useState('fixed');
   const [maxClips, setMaxClips] = useState(5);
@@ -401,6 +411,7 @@ export function LiveMonitorView({ pushToast }) {
         letterbox_zoom: zoom,
         post_timing: postTiming,
         max_posts_per_day: clampPostsPerDay(maxPerDay),
+        review_minutes: clampReviewMinutes(reviewMin),
         chat_signal: !isVod && platform !== 'youtube' ? chatSignal : false,
         caption_template: captionTemplate,
         title_template: titleTemplate,
@@ -683,6 +694,13 @@ export function LiveMonitorView({ pushToast }) {
           <input className="key-input" type="number" min="0" max="100" aria-label="Max posts per day"
             value={maxPerDay} onChange={(e) => setMaxPerDay(e.target.value === '' ? '' : Number(e.target.value))} />
           <div className="od">0 = no limit. Counts posts from every monitor; extra clips move to the next day.</div>
+        </label>
+
+        <label className="field">
+          <span className="field-label">Review window (min)</span>
+          <input className="key-input" type="number" min="0" max="1440" aria-label="Review window minutes"
+            value={reviewMin} onChange={(e) => setReviewMin(e.target.value === '' ? '' : Number(e.target.value))} />
+          <div className="od">New clips wait this long under the monitor with a Discard button, then post on their own. 0 = no wait.</div>
         </label>
 
         <div className="field">

@@ -226,6 +226,7 @@ def pending_clip_summary(entry: dict) -> dict:
         "viral_score": clip.get("viral_score"),
         "video_url": clip.get("video_url") or "",
         "state": entry.get("state") or "queued",
+        "review_until": entry.get("review_until"),
     }
 
 
@@ -548,6 +549,9 @@ def validate_monitor_config(config: dict, default_timezone: str = "Europe/Rome")
         # Posts per local day across every monitor sharing the slot list
         # (0 = no cap). Protects new accounts from a busy stream's burst.
         "max_posts_per_day": _clamp_int(config.get("max_posts_per_day"), 0, 0, 100),
+        # Minutes a finished clip waits in the queue (Discard-able in the
+        # dashboard) before it publishes on its own. 0 = publish when due.
+        "review_minutes": _clamp_int(config.get("review_minutes"), 0, 0, 1440),
     }
 
 
@@ -559,7 +563,7 @@ _UPDATABLE_CONFIG_FIELDS = (
     "segment_seconds", "prelive_skip_seconds", "platforms", "banner", "compose",
     "poll_interval", "delete_after_publish", "max_clips", "clip_selection",
     "min_viral_score", "smart_cut", "letterbox_zoom", "chat_signal",
-    "post_timing", "max_posts_per_day",
+    "post_timing", "max_posts_per_day", "review_minutes",
 )
 
 # The full set of cfg keys worth persisting/restoring (mirrors
@@ -570,7 +574,7 @@ _SNAPSHOT_CONFIG_FIELDS = (
     "instructions", "caption_template", "title_template", "timezone",
     "banner", "compose", "catchup", "delete_after_publish", "max_clips",
     "clip_selection", "min_viral_score", "smart_cut", "letterbox_zoom",
-    "chat_signal", "post_timing", "max_posts_per_day",
+    "chat_signal", "post_timing", "max_posts_per_day", "review_minutes",
 )
 
 
@@ -1897,9 +1901,28 @@ class LiveMonitor:
         if index is not None:
             del self._pending_publish[index]
 
+    def _start_review(self, entry: dict) -> None:
+        """Stamp a newly queued clip with its review deadline. During the
+        window it shows in the dashboard with a Discard button and is not
+        due for publishing; afterwards it publishes on its own."""
+        if "queued_at" in entry:
+            return  # already queued once (restore, re-enqueue): keep its clock
+        entry["queued_at"] = time.time()
+        review = int(self.cfg.get("review_minutes") or 0)
+        if review > 0:
+            entry["review_until"] = entry["queued_at"] + review * 60
+
+    @staticmethod
+    def _due_at(entry: dict) -> float:
+        """When an entry may next be published: after its retry backoff and
+        after its review window, whichever ends later."""
+        return max(float(entry.get("next_retry_at") or 0),
+                   float(entry.get("review_until") or 0))
+
     def _enqueue_publications(self, entries: list[dict]) -> None:
         """Durably queue finished clips, then make sure the drain runs."""
         for entry in entries:
+            self._start_review(entry)
             self._ensure_queued(self._as_publication(entry))
         self._persist()
         if entries and self.publishing_enabled and not self._draining:
@@ -1911,14 +1934,14 @@ class LiveMonitor:
     def _next_due_publication(self) -> dict | None:
         now = time.time()
         for entry in self._pending_publish:
-            if float(entry.get("next_retry_at") or 0) <= now:
+            if self._due_at(entry) <= now:
                 return entry
         return None
 
     def _seconds_until_next_retry(self) -> float | None:
         if not self._pending_publish:
             return None
-        soonest = min(float(e.get("next_retry_at") or 0) for e in self._pending_publish)
+        soonest = min(self._due_at(e) for e in self._pending_publish)
         return max(0.0, soonest - time.time())
 
     async def _publish_one(self, entry: dict) -> None:
