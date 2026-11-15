@@ -76,7 +76,10 @@ worth knowing (full list: [docs/architecture/live-monitor.md](docs/architecture/
 4. Click **Send test**. Your phone should buzz.
 
 You'll get a notification when a monitor finds new clips (with the time they
-post) and when a clip fails to post. Keep the topic name private: anyone who
+post) and when a clip fails to post. You'll also get a warning when something
+stops clipping: Twitch or Kick can't be reached, the Gemini quota runs out, a
+segment fails, the disk is almost full, or a monitor didn't restart. Each
+warning repeats at most once an hour. Keep the topic name private: anyone who
 knows it can read your notifications.
 
 ## 4. Before you post anything

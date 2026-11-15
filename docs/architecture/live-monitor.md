@@ -125,6 +125,17 @@ and one when a clip fails to post for good. A re-queued entry (restart
 hand-off) does not notify again. Sending runs in a worker thread, is
 best-effort and never raises into the monitor.
 
+Health alerts use the same channel for problems that would otherwise stop
+clipping silently, each at most once per hour per kind (`_alert`):
+
+| Alert | When |
+|-------|------|
+| Can't check channel | Live-state checks failed `PROVIDER_ALERT_AFTER` (5) times in a row |
+| Gemini quota used up | A segment came back `gemini_exhausted` and was skipped |
+| Segment failed | A segment job ended `failed` (with its last log line) |
+| Disk almost full | Under `LOW_DISK_ALERT_GB` (5 GB) free after a capture; at most every 6 h |
+| Monitor didn't restart | `auto_resume()` could not start a saved monitor |
+
 ## Failure handling
 
 | Situation | Behaviour |
