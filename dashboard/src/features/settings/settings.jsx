@@ -213,66 +213,27 @@ export function SettingsView({ apiKey, onApiKey, cookiesConfigured, onCookiesCha
       <Hero eyebrow="Settings" line1="Keys & connections." sub="Everything is stored locally. Your keys never leave your machine." />
 
       <Panel title="API keys" sub="Required for transcription & moment detection" icon="key-round" style={{ marginBottom: 18 }}>
-        <div className="opt" role="group" aria-label="Browser credential retention">
-          <div className="oico"><Icon n="shield" /></div>
-          <div className="otxt">
-            <div className="ot">Browser credential retention</div>
-            <div className="od">Session only clears browser copies when the browser session ends. Backend provider keys remain stored on the server.</div>
-          </div>
-          <div className="r">
-            <select aria-label="Browser credential retention" className="key-input" value={browserRetention}
-              onChange={(event) => { setBrowserRetention(setCredentialMode(event.target.value)); pushToast?.('info', 'Browser credential retention updated'); }}>
-              <option value="local">Remember on this device</option>
-              <option value="session">Session only (safer)</option>
-            </select>
-          </div>
-        </div>
         <KeyRow icon="sparkles" name="Gemini" desc="Viral-moment detection" value={gemini} present={present.gemini}
           onChange={(v) => { setGemini(v); onApiKey?.(v); }} onSave={() => saveKeys({ GEMINI_API_KEY: gemini })}
           onClear={() => { setGemini(''); onApiKey?.(''); saveKeys({ GEMINI_API_KEY: '' }); }} placeholder="AIza…" />
         <KeyRow icon="audio-lines" name="Deepgram" desc="Nova-3 transcription" value={deepgram} present={present.deepgram}
           onChange={setDeepgram} onSave={() => saveKeys({ DEEPGRAM_API_KEY: deepgram })}
           onClear={() => { setDeepgram(''); saveKeys({ DEEPGRAM_API_KEY: '' }); }} placeholder="dg_…" />
-        <KeyRow icon="audio-lines" name="ElevenLabs" desc="Scribe transcription · audio-event tags" value={elevenlabs} present={present.elevenlabs}
-          onChange={setElevenlabs} onSave={() => saveKeys({ ELEVENLABS_API_KEY: elevenlabs })}
-          onClear={() => { setElevenlabs(''); saveKeys({ ELEVENLABS_API_KEY: '' }); }} placeholder="sk_…" />
-        <KeyRow icon="scan-face" name="Hugging Face token" desc="Speaker diarization models" value={hf} present={present.hf}
-          onChange={setHf} onSave={() => saveKeys({ HF_TOKEN: hf })}
-          onClear={() => { setHf(''); saveKeys({ HF_TOKEN: '' }); }} placeholder="hf_…" />
         <KeyRow icon="rss" name="Twitch client ID" desc="Live Monitor: Twitch channel detection" value={twitchId} present={present.twitchId}
           onChange={setTwitchId} onSave={() => saveKeys({ TWITCH_CLIENT_ID: twitchId })}
           onClear={() => { setTwitchId(''); saveKeys({ TWITCH_CLIENT_ID: '' }); }} placeholder="Helix app client id" />
         <KeyRow icon="rss" name="Twitch client secret" desc="Live Monitor: Twitch channel detection" value={twitchSecret} present={present.twitchSecret}
           onChange={setTwitchSecret} onSave={() => saveKeys({ TWITCH_CLIENT_SECRET: twitchSecret })}
           onClear={() => { setTwitchSecret(''); saveKeys({ TWITCH_CLIENT_SECRET: '' }); }} placeholder="Helix app client secret" />
-        <KeyRow icon="bell" name="Phone notifications (ntfy topic)" desc="Get a push when a monitor finds new clips or a post fails" value={ntfyTopic} present={present.ntfy}
-          onChange={setNtfyTopic} onSave={() => saveKeys({ NTFY_TOPIC: ntfyTopic.trim() })}
-          onClear={() => { setNtfyTopic(''); setNewTopic(''); saveKeys({ NTFY_TOPIC: '' }); }} placeholder="clippyme-… (use Generate)" />
-        <div className="opt" style={{ borderBottom: 0 }}>
-          <div className="oico"><Icon n="smartphone" /></div>
-          <div className="otxt">
-            <div className="ot">Set up notifications</div>
-            <div className="od">
-              {newTopic
-                ? <>Install the free ntfy app, tap <b>+</b>, and subscribe to <code>{newTopic}</code>. Keep this name private.</>
-                : 'Generate a private topic, subscribe to it in the free ntfy app, then send a test.'}
-            </div>
-          </div>
-          <div className="r">
-            <Btn variant="secondary" size="sm" icon="shuffle" onClick={generateTopic}>Generate</Btn>
-            <Btn variant="secondary" size="sm" icon="send" disabled={!present.ntfy || testingNotify} onClick={testNotify}>
-              {testingNotify ? 'Sending…' : 'Send test'}
-            </Btn>
-          </div>
-        </div>
-        <KeyRow icon="key-round" name="API token" desc="Only for LAN deploys with CLIPPYME_API_TOKEN set — stored in this browser, sent as X-API-Token" value={apiToken} present={!!getApiToken()}
-          onChange={setApiTokenState} onSave={() => { setApiToken(apiToken); pushToast?.('success', apiToken.trim() ? 'API token saved' : 'API token cleared'); }} placeholder="Shared secret (leave empty + Save to clear)" />
         <div className="opt" style={{ borderBottom: 0 }}>
           <div className="oico"><Icon n="audio-lines" /></div>
           <div className="otxt"><div className="ot">Transcription engine</div><div className="od">Cloud STT falls back to local Whisper if its key is missing</div></div>
           <div className="r"><Segmented value={provider}
             onChange={(id) => { setProvider(id); saveKeys({ TRANSCRIPTION_PROVIDER: id }); }}
-            options={[{ id: 'deepgram', label: 'Deepgram' }, { id: 'elevenlabs', label: 'ElevenLabs' }, { id: 'whisper', label: 'Whisper' }]} /></div>
+            options={[{ id: 'deepgram', label: 'Deepgram' },
+              // ElevenLabs is an Advanced option: listed only while selected.
+              ...(provider === 'elevenlabs' ? [{ id: 'elevenlabs', label: 'ElevenLabs' }] : []),
+              { id: 'whisper', label: 'Whisper' }]} /></div>
         </div>
         {provider === 'deepgram' && !present.deepgram && (
           <div className="od" style={{ color: 'var(--warn, #f5a623)', padding: '0 0 8px 44px' }}>⚠ No Deepgram key saved — pipeline will use local Whisper.</div>
@@ -293,6 +254,29 @@ export function SettingsView({ apiKey, onApiKey, cookiesConfigured, onCookiesCha
             </select>
             <Btn variant="ghost" size="sm" icon="refresh-cw" onClick={() => loadModels()} disabled={loadingModels}>
               {loadingModels ? '…' : 'Refresh'}
+            </Btn>
+          </div>
+        </div>
+      </Panel>
+
+      <Panel title="Phone notifications" sub="New clips and problems, pushed to your phone" icon="bell" style={{ marginBottom: 18 }}>
+        <KeyRow icon="bell" name="ntfy topic" desc="Get a push when a monitor finds new clips or something breaks" value={ntfyTopic} present={present.ntfy}
+          onChange={setNtfyTopic} onSave={() => saveKeys({ NTFY_TOPIC: ntfyTopic.trim() })}
+          onClear={() => { setNtfyTopic(''); setNewTopic(''); saveKeys({ NTFY_TOPIC: '' }); }} placeholder="clippyme-… (use Generate)" />
+        <div className="opt" style={{ borderBottom: 0 }}>
+          <div className="oico"><Icon n="smartphone" /></div>
+          <div className="otxt">
+            <div className="ot">Set up notifications</div>
+            <div className="od">
+              {newTopic
+                ? <>Install the free ntfy app, tap <b>+</b>, and subscribe to <code>{newTopic}</code>. Keep this name private.</>
+                : 'Generate a private topic, subscribe to it in the free ntfy app, then send a test.'}
+            </div>
+          </div>
+          <div className="r">
+            <Btn variant="secondary" size="sm" icon="shuffle" onClick={generateTopic}>Generate</Btn>
+            <Btn variant="secondary" size="sm" icon="send" disabled={!present.ntfy || testingNotify} onClick={testNotify}>
+              {testingNotify ? 'Sending…' : 'Send test'}
             </Btn>
           </div>
         </div>
@@ -362,7 +346,34 @@ export function SettingsView({ apiKey, onApiKey, cookiesConfigured, onCookiesCha
         </div>
       </Panel>
 
-      <Panel title="Downloads" sub="For age- or region-restricted sources" icon="cookie">
+
+      <details className="settings-advanced">
+        <summary style={{ cursor: 'pointer', color: 'var(--fg-3)', margin: '8px 0 12px' }}>
+          Advanced: other transcription keys, LAN access, browser storage, cookies
+        </summary>
+        <Panel title="Advanced" sub="Rarely needed for live clipping" icon="sliders-horizontal">
+        <div className="opt" role="group" aria-label="Browser credential retention">
+          <div className="oico"><Icon n="shield" /></div>
+          <div className="otxt">
+            <div className="ot">Browser credential retention</div>
+            <div className="od">Session only clears browser copies when the browser session ends. Backend provider keys remain stored on the server.</div>
+          </div>
+          <div className="r">
+            <select aria-label="Browser credential retention" className="key-input" value={browserRetention}
+              onChange={(event) => { setBrowserRetention(setCredentialMode(event.target.value)); pushToast?.('info', 'Browser credential retention updated'); }}>
+              <option value="local">Remember on this device</option>
+              <option value="session">Session only (safer)</option>
+            </select>
+          </div>
+        </div>
+        <KeyRow icon="audio-lines" name="ElevenLabs" desc="Scribe transcription · audio-event tags" value={elevenlabs} present={present.elevenlabs}
+          onChange={setElevenlabs} onSave={() => saveKeys({ ELEVENLABS_API_KEY: elevenlabs })}
+          onClear={() => { setElevenlabs(''); saveKeys({ ELEVENLABS_API_KEY: '' }); }} placeholder="sk_…" />
+        <KeyRow icon="scan-face" name="Hugging Face token" desc="Speaker diarization models" value={hf} present={present.hf}
+          onChange={setHf} onSave={() => saveKeys({ HF_TOKEN: hf })}
+          onClear={() => { setHf(''); saveKeys({ HF_TOKEN: '' }); }} placeholder="hf_…" />
+        <KeyRow icon="key-round" name="API token" desc="Only for LAN deploys with CLIPPYME_API_TOKEN set — stored in this browser, sent as X-API-Token" value={apiToken} present={!!getApiToken()}
+          onChange={setApiTokenState} onSave={() => { setApiToken(apiToken); pushToast?.('success', apiToken.trim() ? 'API token saved' : 'API token cleared'); }} placeholder="Shared secret (leave empty + Save to clear)" />
         <div className="opt" style={{ borderBottom: 0 }}>
           <div className="oico"><Icon n="cookie" /></div>
           <div className="otxt"><div className="ot">YouTube cookies</div><div className="od">{cookies ? 'Configured · restricted videos OK' : 'Not set · public videos only'}</div></div>
@@ -374,7 +385,8 @@ export function SettingsView({ apiKey, onApiKey, cookiesConfigured, onCookiesCha
             {cookies && <Btn variant="ghost" size="sm" icon="trash-2" onClick={removeCookies}>Remove</Btn>}
           </div>
         </div>
-      </Panel>
+        </Panel>
+      </details>
     </div>
   );
 }
