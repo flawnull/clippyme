@@ -849,6 +849,7 @@ class LiveMonitor:
         # seg_path -> chat-spike hint for that segment's job (not persisted:
         # it is baked into the job's argv at submit time).
         self._chat_hints: dict[str, str] = {}
+        self._chat_spikes: dict = {}  # seg_path -> chat_signal.Spike list
         self._provider_failures = 0
         self._provider_retry_after = 0.0
         self._alert_last: dict[str, float] = {}  # alert kind -> last sent (time.time)
@@ -1231,6 +1232,7 @@ class LiveMonitor:
             self._check_disk()
             job_id = await self._submit_waiting_for_queue(self._submit_segment_job, seg_path)
             self._chat_hints.pop(seg_path, None)
+            self._chat_spikes.pop(seg_path, None)
             if job_id is None:
                 # Stopped while the queue was full: no job owns the segment and
                 # nothing tracks it across a restart — release it, loudly.
@@ -1299,17 +1301,19 @@ class LiveMonitor:
             return None
 
     def _remember_chat_hint(self, seg_path: str, events, duration: float) -> None:
-        """Turn one segment's chat into a Gemini hint, kept for its job."""
-        from clippyme.monitoring.chat_signal import build_chat_hint
+        """Turn one segment's chat into a Gemini hint and spike windows, kept
+        for its job (the windows back the no-Gemini fallback)."""
+        from clippyme.monitoring.chat_signal import find_spikes, format_hint
         try:
-            hint = build_chat_hint(events, duration)
+            spikes = find_spikes(events, duration)
         except Exception:
             logger.warning("LiveMonitor %s: chat hint failed", self.id, exc_info=True)
             return
         logger.info("LiveMonitor %s: %d chat messages, %s", self.id, len(events),
-                    "spikes found" if hint else "no spike")
-        if hint:
-            self._chat_hints[seg_path] = hint
+                    "spikes found" if spikes else "no spike")
+        if spikes:
+            self._chat_hints[seg_path] = format_hint(spikes)
+            self._chat_spikes[seg_path] = spikes
 
     async def _capture_segment(self, url: str | None) -> str | None:
         """Capture up to ``segment_seconds`` of the live stream to a file."""
@@ -1679,6 +1683,13 @@ class LiveMonitor:
         from clippyme.monitoring.chat_signal import merge_instructions
 
         job_id, job_dir, env = self._new_job_dir()
+        spikes = self._chat_spikes.get(seg_path)
+        if spikes:
+            from clippyme.pipeline.analysis.chat_fallback import write_spikes
+            try:
+                write_spikes(job_dir, spikes)
+            except OSError:
+                logger.warning("LiveMonitor %s: could not save chat spikes", self.id, exc_info=True)
         # Chat spikes recorded during this segment's capture, if any. Read, not
         # popped: a QueueFullError retry submits the same segment again.
         instructions = merge_instructions(
@@ -1771,9 +1782,13 @@ class LiveMonitor:
                 self._gemini_exhausted_at = datetime.now(timezone.utc).isoformat()
                 self._persist()
                 logger.warning("LiveMonitor %s: Gemini rate-limited — segment %s skipped", self.id, job_id)
+                rescued = bool(result.get("clips"))
                 self._alert("gemini", "Gemini quota used up",
-                            f"A segment from {self.cfg.get('channel')} was skipped. The free "
-                            "quota resets daily; Gemini 3.5 Flash Lite in Settings allows more requests.")
+                            (f"Clips from {self.cfg.get('channel')} now come from chat spikes only, "
+                             "with simple titles." if rescued else
+                             f"A segment from {self.cfg.get('channel')} was skipped.")
+                            + " The free quota resets daily; Gemini 3.5 Flash Lite in Settings "
+                            "allows more requests.")
             clips = result.get("clips") or []
             if clips:
                 self._gemini_exhausted_at = None  # a good segment clears the notice
