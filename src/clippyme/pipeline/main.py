@@ -410,6 +410,10 @@ def transcribe_video(video_path):
 def get_viral_clips(transcript_result, video_duration, instructions=None):
     print("🤖  Analyzing with Gemini...")
     get_viral_clips._last_gemini_exhausted = False
+    # True when Gemini could not give a usable answer (API error, unreadable or
+    # invalid output), as opposed to answering "nothing worth clipping". The
+    # monitor then falls back to chat spikes (orchestrator._chat_spike_fallback).
+    get_viral_clips._last_gemini_failed = False
 
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
@@ -448,6 +452,7 @@ def get_viral_clips(transcript_result, video_duration, instructions=None):
             get_viral_clips._last_gemini_exhausted = True
             print("🚫 All Gemini models rate-limited — no clips this run.")
         print(f"❌ Gemini API failed across model chain: {e}")
+        get_viral_clips._last_gemini_failed = True
         return None
 
     # --- Cost Calculation (pure math in gemini_request) ---
@@ -522,6 +527,7 @@ def get_viral_clips(transcript_result, video_duration, instructions=None):
 
         if parse_result.data is None:
             print(f"❌ Failed to parse Gemini response: {parse_result.error}")
+            get_viral_clips._last_gemini_failed = True
             return None
 
         try:
@@ -533,6 +539,7 @@ def get_viral_clips(transcript_result, video_duration, instructions=None):
             )
         except ValidationError as e:
             print(f"❌ Pydantic validation failed: {e}")
+            get_viral_clips._last_gemini_failed = True
             return None
 
         if not clips:

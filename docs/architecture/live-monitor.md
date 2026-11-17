@@ -54,7 +54,9 @@ again automatically.
   carry no hint, since their chat was not recorded.
 - **Chat fallback when Gemini is out of quota:** the spike windows are also
   written to `chat_spikes.json` in the segment's job directory. When every
-  Gemini model is rate-limited, the orchestrator builds clips from them
+  Gemini model is rate-limited, or Gemini fails (network error, unreadable or
+  invalid answer; not when it answers that nothing is worth clipping), the
+  orchestrator builds clips from them
   (`pipeline/analysis/chat_fallback.py`) instead of skipping the segment:
   15-60 s windows around the strongest spikes, generic reaction titles and
   hooks, scores of 72-90 by spike strength, the same `max_clips` and score

@@ -34,7 +34,7 @@ def test_clips_are_ranked_bounded_and_shaped_like_gemini_output():
     assert laugh["viral_hook_text"] == laugh["hook"]
     assert laugh["tiktok_caption"] == "no way he just did that"
     assert laugh["viral_score"] > shock["viral_score"] >= 72
-    assert "Gemini quota was used up" in laugh["viral_reason"]
+    assert "Gemini was unavailable" in laugh["viral_reason"]
 
 
 def test_windows_stay_inside_the_video_and_overlaps_keep_the_stronger():
@@ -108,3 +108,36 @@ def test_spike_file_is_ignored_when_gemini_worked(tmp_path, monkeypatch):
     plan = _analyze(tmp_path, monkeypatch, _Working())
     assert [c["title"] for c in plan["shorts"]] == ["AI pick"]
     assert "clip_source" not in plan
+
+
+class _FailedLegacy:
+    """Gemini errored (network, unreadable answer), quota not exhausted."""
+
+    def get_viral_clips(self, transcript, duration, instructions=None):
+        self.get_viral_clips.__func__._last_gemini_exhausted = False
+        self.get_viral_clips.__func__._last_gemini_failed = True
+        return None
+
+
+class _NothingGoodLegacy:
+    """Gemini answered, but no clip cleared the bar."""
+
+    def get_viral_clips(self, transcript, duration, instructions=None):
+        self.get_viral_clips.__func__._last_gemini_exhausted = False
+        self.get_viral_clips.__func__._last_gemini_failed = False
+        return None
+
+
+def test_gemini_network_failure_also_falls_back_to_chat_spikes(tmp_path, monkeypatch):
+    """Reported: 'Server disconnected without sending a response' left a
+    segment with chat spikes and no clips."""
+    cf.write_spikes(str(tmp_path), [Spike(80, 130, 4.2, "laugh")])
+    plan = _analyze(tmp_path, monkeypatch, _FailedLegacy())
+    assert plan["clip_source"] == "chat_fallback" and len(plan["shorts"]) == 1
+    assert plan["gemini_exhausted"] is False
+
+
+def test_gemini_judging_nothing_worth_clipping_is_respected(tmp_path, monkeypatch):
+    cf.write_spikes(str(tmp_path), [Spike(80, 130, 4.2, "laugh")])
+    plan = _analyze(tmp_path, monkeypatch, _NothingGoodLegacy())
+    assert plan["shorts"] == []

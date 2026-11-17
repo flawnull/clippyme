@@ -231,7 +231,7 @@ def _chat_spike_fallback(output_dir: str, transcript: dict, duration: float) -> 
     shorts = [c for c in (clips or {}).get("shorts", []) if c["viral_score"] >= floor]
     if not shorts:
         return None
-    print(f"💬 Gemini quota used up — {len(shorts)} clip(s) from chat spikes instead", flush=True)
+    print(f"💬 Gemini unavailable — {len(shorts)} clip(s) from chat spikes instead", flush=True)
     return {"shorts": shorts, "clip_source": "chat_fallback"}
 
 
@@ -475,10 +475,14 @@ def _load_or_analyze(
             if not should_use_fallback(args.monitor):
                 exhausted = bool(
                     getattr(legacy.get_viral_clips, "_last_gemini_exhausted", False))
-                # Gemini out of quota: clip the segment's chat spikes instead of
-                # publishing nothing (pipeline/analysis/chat_fallback.py).
+                failed = bool(
+                    getattr(legacy.get_viral_clips, "_last_gemini_failed", False))
+                # Gemini out of quota or failing (network, unreadable answer):
+                # clip the segment's chat spikes instead of publishing nothing
+                # (pipeline/analysis/chat_fallback.py). A Gemini answer of
+                # "nothing worth clipping" is respected.
                 fallback = (_chat_spike_fallback(output_dir, transcript, duration)
-                            if exhausted else None)
+                            if exhausted or failed else None)
                 clips_data = fallback or {"shorts": []}
                 clips_data["gemini_exhausted"] = exhausted
             else:
