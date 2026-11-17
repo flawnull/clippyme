@@ -222,8 +222,23 @@ def remaining_prelive(prelive_skip_seconds: int, started_at, now) -> int:
 MAX_PENDING_LISTED = 50
 
 
-def pending_clip_summary(entry: dict) -> dict:
-    """Public fields of one queued publication for the dashboard (no paths)."""
+def _served_url(path: str | None, output_dir: str) -> str:
+    """``/videos/...`` URL of a file under the output dir (served by the
+    /videos mount), or "" for a missing path or one outside it."""
+    if not path:
+        return ""
+    from urllib.parse import quote
+    rel = os.path.relpath(os.path.abspath(path), os.path.abspath(output_dir))
+    if rel.startswith("..") or os.path.isabs(rel):
+        return ""
+    return "/videos/" + "/".join(quote(part) for part in rel.split(os.sep))
+
+
+def pending_clip_summary(entry: dict, output_dir: str = "") -> dict:
+    """Public fields of one queued publication for the dashboard (no paths).
+
+    ``preview_url`` is the composed file the monitor uploads (subtitles, hook,
+    banner burned in); ``video_url`` is the raw cut, kept for older clients."""
     clip = entry.get("clip") or {}
     return {
         "publication_id": entry.get("publication_id"),
@@ -232,6 +247,7 @@ def pending_clip_summary(entry: dict) -> dict:
         "title": clip.get("title") or "",
         "viral_score": clip.get("viral_score"),
         "video_url": clip.get("video_url") or "",
+        "preview_url": _served_url(entry.get("composed_path"), output_dir) if output_dir else "",
         "state": entry.get("state") or "queued",
         "review_until": entry.get("review_until"),
     }
@@ -915,7 +931,7 @@ class LiveMonitor:
             "resume_on_start": self.resume_on_start,
             "publishing_enabled": self.publishing_enabled,
             "pending_publish": len(self._pending_publish),
-            "pending_clips": [pending_clip_summary(e)
+            "pending_clips": [pending_clip_summary(e, self._output_dir)
                               for e in self._pending_publish[:MAX_PENDING_LISTED]],
             "failed_publish": len(self._failed_publish),
             "gemini_exhausted_at": self._gemini_exhausted_at,
