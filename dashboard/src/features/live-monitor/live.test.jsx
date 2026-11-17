@@ -478,3 +478,18 @@ test('review window rides the start payload and the Settings drawer', async () =
   await waitFor(() => expect(startLiveMonitor).toHaveBeenCalled());
   expect(startLiveMonitor.mock.calls[0][0].review_minutes).toBe(15);
 });
+
+test('queued clip preview plays and downloads the composed file', async () => {
+  mockStatus.mockResolvedValue({
+    monitors: [{ id: 'kick:n3on', platform: 'kick', mode: 'live', running: true, state: 'capturing',
+      channel: 'n3on', publishing_enabled: false, pending_publish: 1,
+      pending_clips: [{ publication_id: 'p-1', title: 'Big moment', viral_score: 88, state: 'queued',
+        video_url: '/videos/j1/clip_0.mp4', preview_url: '/videos/monitor_kick_n3on/Big%20moment.mp4' }] }],
+  });
+  render(<LiveMonitorView />);
+  const video = await screen.findByLabelText('Preview: Big moment');
+  expect(video.getAttribute('src')).toBe('/videos/monitor_kick_n3on/Big%20moment.mp4');
+  const download = screen.getByRole('link', { name: 'Download Big moment' });
+  expect(download.getAttribute('href')).toBe('/videos/monitor_kick_n3on/Big%20moment.mp4');
+  expect(download).toHaveAttribute('download');
+});

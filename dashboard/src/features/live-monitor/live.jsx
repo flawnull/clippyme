@@ -259,10 +259,13 @@ function PendingClips({ monitor, onDiscard, discardingId }) {
       <div className="od">Queued to publish. Discard any clip you don&apos;t want posted; it stays in History.</div>
       {clips.map((c) => {
         const busy = c.state === 'in_flight';
+        // The composed file is what gets posted (subtitles, hook, banner);
+        // the raw cut is only a fallback for queues from older versions.
+        const src = c.preview_url || c.video_url;
         return (
           <div key={c.publication_id} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            {c.video_url && (
-              <video src={getApiUrl(c.video_url)} controls muted playsInline preload="metadata"
+            {src && (
+              <video src={getApiUrl(src)} controls muted playsInline preload="metadata"
                 aria-label={`Preview: ${c.title || 'clip'}`}
                 style={{ width: 72, height: 128, objectFit: 'cover', borderRadius: 8, background: '#000', flexShrink: 0 }} />
             )}
@@ -274,6 +277,12 @@ function PendingClips({ monitor, onDiscard, discardingId }) {
                   : reviewLabel(c.review_until, monitor.publishing_enabled)}
               </div>
             </div>
+            {src && (
+              <a className="btn btn-ghost btn-sm" href={getApiUrl(src)} download
+                aria-label={`Download ${c.title || 'clip'}`}>
+                <Icon n="download" /><span>Download</span>
+              </a>
+            )}
             <Btn variant="secondary" size="sm" icon="trash-2"
               disabled={busy || discardingId === c.publication_id}
               aria-label={`Discard ${c.title || 'clip'}`}

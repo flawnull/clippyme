@@ -112,3 +112,23 @@ def test_clip_discarded_during_the_drain_spacing_sleep_is_not_published(tmp_path
     asyncio.run(run())
     assert published == ["first"]
     assert mon._pending_publish == []
+
+
+def test_preview_is_the_composed_file_that_gets_posted(tmp_path):
+    """Reported: the queue preview showed the raw cut without subtitles or
+    hook, while the monitor uploads the composed copy."""
+    mon = _monitor(tmp_path)
+    entry = _entry(mon, "j1", 0, "Chat goes wild 😳 #1")
+    mon._enqueue_publications([entry])
+    clip = mon.status()["pending_clips"][0]
+    folder = os.path.basename(mon._clip_dir)
+    assert clip["preview_url"] == f"/videos/{folder}/Chat%20goes%20wild%20%F0%9F%98%B3%20%231.mp4"
+    assert clip["video_url"] == "/videos/j1/clip_0.mp4"  # raw cut still there
+
+
+def test_preview_url_never_points_outside_the_output_dir(tmp_path):
+    from clippyme.monitoring.live_monitor import _served_url
+    out = tmp_path / "out"
+    assert _served_url(str(tmp_path / "elsewhere.mp4"), str(out)) == ""
+    assert _served_url(None, str(out)) == ""
+    assert _served_url(str(out / "a" / "b.mp4"), str(out)) == "/videos/a/b.mp4"
