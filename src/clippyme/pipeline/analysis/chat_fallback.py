@@ -116,7 +116,7 @@ def build_chat_spike_clips(spikes: list[dict], transcript: dict, duration: float
             "tiktok_caption": (text[:150] or title),
             "viral_score": _score(spike.get("ratio")),
             "viral_reason": (f"Chat spike fallback: chat hit {spike.get('ratio')}x its normal "
-                             "pace here. Gemini quota was used up, so no AI scoring."),
+                             "pace here. Gemini was unavailable, so no AI scoring."),
             "hook": hook,
             "viral_hook_text": hook,
         })

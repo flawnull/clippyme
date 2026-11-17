@@ -110,6 +110,7 @@ docker compose logs backend | grep -i "chat"
 
 A line like `1843 chat messages, spikes found` means it is working.
 
-If the free Gemini quota runs out, segments are no longer skipped: the monitor
+If the free Gemini quota runs out or Gemini has an outage, segments are no
+longer skipped: the monitor
 cuts clips around the chat spikes instead, with simple titles like "Chat could
 not believe this 😳". You get a phone warning when that starts.
