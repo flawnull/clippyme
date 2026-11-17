@@ -429,7 +429,7 @@ def effective_fonts_dir():
 # cap stops an out-of-range API value (validated up to 100000 by the generic
 # overlay validator) from reaching ffmpeg.
 _SUB_FONTSIZE_MIN = 10
-_SUB_FONTSIZE_MAX = 120
+_SUB_FONTSIZE_MAX = 200
 
 
 def _clamp_fontsize(size, default):

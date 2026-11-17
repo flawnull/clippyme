@@ -66,7 +66,9 @@ def test_build_monitor_compose_defaults():
     assert recipe["hook_params"]["position"] == "top"
     assert recipe["hook_params"]["text"] == "Wait for it"
     # subtitles below the banner, left-aligned
-    assert recipe["subtitle_params"] == {"position": "bottom", "align": "left"}
+    assert recipe["subtitle_params"] == {"preset": "classic_white", "position": "bottom",
+                                         "align": "center", "font_size": 135,
+                                         "words_per_group": 2}
     # banner auto-injected from the monitor's platform + channel
     assert recipe["banner_params"]["platform"] == "kick"
     assert recipe["banner_params"]["handle"] == "grenbaud"
@@ -1450,3 +1452,16 @@ def test_vod_start_offset_skips_prelive_only_where_a_prelive_exists():
     # A YouTube upload has no prelive — trimming would eat real content.
     yt = SimpleNamespace(platform="youtube", cfg=cfg)
     assert LiveMonitor._vod_start_offset(yt) == 0.0
+
+
+def test_monitor_subtitle_override_auto_size_keeps_the_large_default():
+    """The dashboard override sends font_size 0 ('Auto'); on a monitor that
+    must not fall back to the small preset size."""
+    from clippyme.monitoring.live_monitor import MONITOR_SUBTITLE_SIZE, build_monitor_compose
+    recipe = build_monitor_compose("kick", "n3on", {"viral_hook_text": "x"},
+                                   {"subtitle_params": {"preset": "hormozi_bold", "font_size": 0,
+                                                        "align": "center"}})
+    assert recipe["subtitle_params"]["font_size"] == MONITOR_SUBTITLE_SIZE
+    assert recipe["subtitle_params"]["preset"] == "hormozi_bold"
+    custom = build_monitor_compose("kick", "n3on", {}, {"subtitle_params": {"font_size": 160}})
+    assert custom["subtitle_params"]["font_size"] == 160
