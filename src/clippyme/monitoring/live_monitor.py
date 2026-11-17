@@ -288,6 +288,9 @@ def allocate_clip_filename(title_template, clip, existing, counter):
     return candidate, counter
 
 
+MONITOR_SUBTITLE_SIZE = 135
+
+
 def build_monitor_compose(platform: str, channel: str, clip: dict, override=None,
                           smart_cut: bool = False) -> dict:
     """Compose recipe a monitor burns before auto-publishing one clip.
@@ -296,7 +299,7 @@ def build_monitor_compose(platform: str, channel: str, clip: dict, override=None
       - hook  → top black bar (position 'top', full-clip since reframe disabled),
       - banner → attribution pill attached under the video band (mode auto-
         selected to 'attach' by the compose layer for disabled clips),
-      - subtitles → below the banner, left-aligned ('bottom' + align 'left').
+      - subtitles → below the banner, centred, large, two words at a time.
 
     ``override`` (the start request's ``compose`` object) shallow-merges over the
     defaults: ``{toggles?, hook_params?, subtitle_params?, banner?}``. Pure /
@@ -308,7 +311,16 @@ def build_monitor_compose(platform: str, channel: str, clip: dict, override=None
     banner = monitor_banner_params(platform, channel, ov.get("banner"))
     hook_text = str(clip.get("viral_hook_text") or clip.get("title") or "").strip()
     hook_params = {"text": hook_text, "position": "top", **(ov.get("hook_params") or {})}
-    subtitle_params = {"position": "bottom", "align": "left", **(ov.get("subtitle_params") or {})}
+    # TikTok-style captions: centred under the banner, two words at a time,
+    # white with the spoken word in yellow, large enough to read on a phone
+    # (an ASS size of 135 is ~60 px cap height on the 1920 px frame).
+    subtitle_params = {"preset": "classic_white", "position": "bottom", "align": "center",
+                       "font_size": MONITOR_SUBTITLE_SIZE, "words_per_group": 2,
+                       **(ov.get("subtitle_params") or {})}
+    # The dashboard's subtitle override sends font_size 0 for "Auto": on a
+    # monitor that means the large default, not the small preset size.
+    if not subtitle_params.get("font_size"):
+        subtitle_params["font_size"] = MONITOR_SUBTITLE_SIZE
     toggles = {
         "hook": bool(hook_params.get("text")),
         "subtitles": True,
