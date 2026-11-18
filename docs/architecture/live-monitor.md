@@ -90,7 +90,8 @@ again automatically.
   and publishes are in English. A clip is marked only when both its
   subtitles and text are done; the sweep pauses after two jobs without
   progress (Gemini quota, missing keys) and resumes at the next start.
-  `multi` keeps auto-detection.
+  `multi` keeps auto-detection of the spoken language; titles, hooks and
+  captions are still written in English (`DEFAULT_OUTPUT_LANGUAGE`).
 - **Runtime config**: `POST /api/live-monitor/{id}/config` changes an
   allow-listed set of fields (templates, instructions, spacing, segment
   length, platforms, look, chat signal); changes apply to future clips. Platform, mode and
