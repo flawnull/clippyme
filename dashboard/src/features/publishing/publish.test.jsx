@@ -24,7 +24,8 @@ const clips = [
 function mount(selected = clips.slice(0, 1), onClose = vi.fn()) {
   const onPublished = vi.fn();
   render(<PublishModal clips={selected} jobId="publish-mode-test" clipStates={{}}
-    preselections={{}} onClose={onClose} onPublished={onPublished} pushToast={vi.fn()} />);
+    preselections={{}} onClose={onClose} onPublished={onPublished} pushToast={vi.fn()}
+    initialSchedule />);
   return onPublished;
 }
 
@@ -264,4 +265,20 @@ test('exact-time confirmation shows device timezone, provider timezone and submi
   expect(details).toHaveTextContent('Device timezone:');
   expect(details).toHaveTextContent('Zernio timezone: Europe/Rome');
   expect(details).toHaveTextContent(new Date(local).toISOString());
+});
+
+test('by default the modal publishes now to every connected account', async () => {
+  vi.mocked(getZernio).mockResolvedValue({
+    configured: true, accounts: { tiktok: 'tt-1', youtube: 'yt-1' }, timezone: 'Europe/Rome',
+  });
+  render(<PublishModal clips={clips.slice(0, 1)} jobId="defaults" clipStates={{}} preselections={{}}
+    onClose={vi.fn()} onPublished={vi.fn()} pushToast={vi.fn()} />);
+  const now = await screen.findByRole('button', { name: 'Publish now' });
+  await waitFor(() => expect(now).toBeEnabled());
+  expect(screen.getByRole('switch')).toHaveAttribute('aria-checked', 'false');
+  fireEvent.click(now);
+  await waitFor(() => expect(publishClip).toHaveBeenCalledTimes(1));
+  const body = vi.mocked(publishClip).mock.calls[0][2];
+  expect(body.schedule_mode).toBe('now');
+  expect(body.platforms.map((p) => p.platform).sort()).toEqual(['tiktok', 'youtube']);
 });
