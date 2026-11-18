@@ -125,3 +125,29 @@ If the free Gemini quota runs out or Gemini has an outage, segments are no
 longer skipped: the monitor
 cuts clips around the chat spikes instead, with simple titles like "Chat could
 not believe this 😳". You get a phone warning when that starts.
+
+## Stopping and freeing disk space
+
+Stop everything:
+
+```bash
+docker compose down
+```
+
+Clips, recordings and temporary files live in `output/`, `uploads/` and
+`tmp/` inside the repo folder. Deleting them removes every clip and History
+entry; `data/` (your keys and settings) is kept:
+
+```bash
+rm -rf output/* uploads/* tmp/*
+```
+
+The Docker images and build cache take the most space (several GB). This
+removes only this project's images, plus Docker's build cache:
+
+```bash
+docker compose down --rmi all --volumes
+docker builder prune -af
+```
+
+The next `docker compose up --build -d` rebuilds everything from scratch.

@@ -6,8 +6,8 @@
   <p><b>Turn long videos into vertical shorts, on your own machine.</b></p>
 
   <p>
-    <a href="https://github.com/fralapo/clippyme/actions/workflows/ci.yml"><img src="https://github.com/fralapo/clippyme/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" /></a>
-    <img src="https://img.shields.io/github/license/fralapo/clippyme?color=3b82f6" alt="MIT license" />
+    <a href="https://github.com/flawnull/clippyme/actions/workflows/ci.yml"><img src="https://github.com/flawnull/clippyme/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" /></a>
+    <img src="https://img.shields.io/github/license/flawnull/clippyme?color=3b82f6" alt="MIT license" />
     <img src="https://img.shields.io/badge/python-3.11-3776AB?logo=python&logoColor=white" alt="Python 3.11" />
   </p>
 </div>
@@ -17,6 +17,37 @@ link or a video file; it finds the moments worth sharing, cuts them into 9:16
 clips with captions, and lets you polish and publish them to TikTok,
 Instagram and YouTube. It can also watch Kick, Twitch and YouTube channels and
 do all of that automatically.
+
+## This fork: a hands-off stream clipper
+
+This fork of [fralapo/clippyme](https://github.com/fralapo/clippyme) turns the
+live monitor into an automated clipper for Kick and Twitch streams. It
+watches a channel, clips each 30-minute segment, and posts the best clips to
+TikTok and YouTube Shorts through Zernio. It was built and run during the
+GTA 6 launch in November 2026. Additions:
+
+- **Split layout.** Facecam on top and gameplay below, with the camera
+  found by face detection. Falls back to letterbox when there is no steady
+  webcam.
+- **Chat signal.** Reads Kick and Twitch chat anonymously while a segment
+  records and points Gemini at chat spikes. When Gemini is out of quota, it
+  cuts clips around the spikes instead of skipping the segment.
+- **Review window.** Each clip waits 15 minutes with **Post now** and
+  **Discard** buttons before it posts. A daily cap and spacing between
+  posts apply across all monitors.
+- **English only.** Transcription and every title, hook and caption are
+  locked to English. Older clips are repaired once at startup.
+- **Phone alerts** through ntfy, for new clips, failed posts and anything
+  that stops clipping.
+- **Quick updates.** `scripts/update.sh` restarts in seconds and rebuilds
+  only when dependencies change.
+
+Setup notes for running it this way: [SETUP.md](SETUP.md).
+
+**Status:** finished and kept as a personal project; not actively run.
+Before clipping anyone, join their clipping program and follow its rules.
+Platforms flag some stream content (IRL scenes, for example), so review
+clips before they post.
 
 ## What it does
 
@@ -60,7 +91,7 @@ overview](docs/architecture/overview.md) explains the design.
 You need Docker with Compose v2. Then:
 
 ```bash
-git clone https://github.com/fralapo/clippyme.git
+git clone https://github.com/flawnull/clippyme.git
 cd clippyme
 docker compose up --build
 ```
