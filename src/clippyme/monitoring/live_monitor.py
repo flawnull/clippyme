@@ -97,6 +97,9 @@ DISK_ALERT_COOLDOWN_SECONDS = 6 * 3600
 PROVIDER_ALERT_AFTER = 5
 # Free space under which each new segment triggers a low-disk alert.
 LOW_DISK_ALERT_GB = 5.0
+# Captures of a live stream that produced no video, in a row, before alerting.
+CAPTURE_ALERT_AFTER = 3
+_CAPTURE_ERROR_PREFIX = "recording failed"
 # How long an accepted clip stays in the ``published`` dedup guard after its
 # job has no queued entry left: Zernio's Idempotency-Key replay window. Past it
 # a queued duplicate can only come from a job still referenced by the queue,
@@ -752,7 +755,7 @@ class KickStrategy:
             return ["ffmpeg", "-hide_banner", "-loglevel", "warning",
                     "-i", url, "-c", "copy", "-t", str(seconds), "-y", seg_path]
         if shutil.which("streamlink"):
-            return ["streamlink", "--hls-duration", _hhmmss(seconds),
+            return ["streamlink", "--stream-segmented-duration", _hhmmss(seconds),
                     f"https://kick.com/{self.channel}", "best", "-o", seg_path]
         return None
 
@@ -782,7 +785,7 @@ class TwitchStrategy:
     def capture_args(self, seg_path: str, seconds: int, url):
         if not shutil.which("streamlink"):
             return None
-        return ["streamlink", "--twitch-disable-ads", "--hls-duration", _hhmmss(seconds),
+        return ["streamlink", "--stream-segmented-duration", _hhmmss(seconds),
                 f"twitch.tv/{self.channel}", "best", "-o", seg_path]
 
     def fetch_vods(self):
@@ -882,6 +885,7 @@ class LiveMonitor:
         self._provider_failures = 0
         self._provider_retry_after = 0.0
         self._alert_last: dict[str, float] = {}  # alert kind -> last sent (time.time)
+        self._capture_failures = 0
         # Every good clip is composed at segment-completion and written here,
         # title-named with a continuous (never-reset) collision counter so no
         # two files ever collide. Folder path is derived from id (not persisted);
@@ -1355,12 +1359,17 @@ class LiveMonitor:
             self.last_error = "no capture tool available (streamlink not installed?)"
             return None
 
+        # stderr goes to a file, not DEVNULL: a capture that dies at once
+        # (broken tool, auth, geo block) must say why in the log and the card.
+        err_path = seg_path + ".log"
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *args, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+            with open(err_path, "wb") as err_file:
+                proc = await asyncio.create_subprocess_exec(
+                    *args, stdout=asyncio.subprocess.DEVNULL, stderr=err_file)
         except FileNotFoundError:
             logger.error("LiveMonitor %s: capture tool not found (%s)", self.id, args[0])
             self.last_error = f"{args[0]} not installed"
+            _safe_remove(err_path)
             return None
         self._ffmpeg_proc = proc
         try:
@@ -1370,8 +1379,39 @@ class LiveMonitor:
 
         if not os.path.isfile(seg_path) or os.path.getsize(seg_path) == 0:
             _safe_remove(seg_path)
+            self._record_capture_failure(args[0], proc.returncode, err_path)
             return None
+        _safe_remove(err_path)
+        if self._capture_failures:
+            logger.info("LiveMonitor %s: capture working again after %d failure(s)",
+                        self.id, self._capture_failures)
+            self._capture_failures = 0
+            if (self.last_error or "").startswith(_CAPTURE_ERROR_PREFIX):
+                self.last_error = None
         return seg_path
+
+    def _record_capture_failure(self, tool: str, returncode, err_path: str) -> None:
+        """Log why a capture produced nothing, and alert when it keeps failing."""
+        tail = ""
+        try:
+            with open(err_path, "rb") as fh:
+                fh.seek(0, os.SEEK_END)
+                fh.seek(max(0, fh.tell() - 2000))
+                lines = [ln.strip() for ln in fh.read().decode("utf-8", "replace").splitlines()
+                         if ln.strip() and "deprecat" not in ln.lower()
+                         and "running as root" not in ln]
+                tail = " | ".join(lines[-3:])[:400]
+        except OSError:
+            pass
+        _safe_remove(err_path)
+        self._capture_failures += 1
+        reason = tail or f"{tool} exited with code {returncode} and no output"
+        self.last_error = f"{_CAPTURE_ERROR_PREFIX} ({self._capture_failures}x): {reason}"
+        logger.warning("LiveMonitor %s: capture produced no video (%s exit %s): %s",
+                       self.id, tool, returncode, reason)
+        if self._capture_failures >= CAPTURE_ALERT_AFTER:
+            self._alert("capture", f"Can't record {self.cfg.get('channel')}",
+                        f"The stream is live but recording fails: {reason[:200]}")
 
     # -- backfill (recover the window missed before capture started) ------
 
