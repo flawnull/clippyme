@@ -513,3 +513,25 @@ test('Post now posts one queued clip; an approved clip shows Posting…', async 
   expect(screen.getByRole('button', { name: 'Post Already sent now' })).toBeDisabled();
   expect(screen.getByText(/posting soon/)).toBeInTheDocument();
 });
+
+test('layout defaults to cam + gameplay and can be changed per monitor', async () => {
+  const { startLiveMonitor, updateMonitorConfig } = await import('../../api/client');
+  mockStatus.mockResolvedValue({
+    monitors: [{ id: 'kick:n3on', platform: 'kick', mode: 'live', running: true, state: 'capturing',
+      channel: 'n3on', config: { layout: 'split' } }],
+  });
+  render(<LiveMonitorView />);
+  await screen.findByText('n3on');
+  fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+  const drawer = document.querySelector('.cfg-drawer');
+  fireEvent.click(within(drawer).getByRole('button', { name: 'Full frame' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+  await waitFor(() => expect(updateMonitorConfig).toHaveBeenCalled());
+  expect(updateMonitorConfig.mock.calls[0][1].layout).toBe('letterbox');
+
+  fireEvent.change(screen.getByLabelText('Channel'), { target: { value: 'xqc' } });
+  await waitFor(() => expect(screen.getByRole('button', { name: /Start monitor/ })).not.toBeDisabled());
+  fireEvent.click(screen.getByRole('button', { name: /Start monitor/ }));
+  await waitFor(() => expect(startLiveMonitor).toHaveBeenCalled());
+  expect(startLiveMonitor.mock.calls[0][0].layout).toBe('split');
+});

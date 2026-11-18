@@ -32,6 +32,14 @@ const SUB_DEFAULTS = {
 const ZOOM_OPTIONS = LETTERBOX_ZOOM_PERCENTS.map(
   (p) => ({ id: String(p), label: p ? `${p}%` : 'No zoom' }));
 
+// How a clip is framed: facecam over gameplay (the usual clipper format; a
+// clip without a steady camera falls back to full frame), or the whole frame
+// between black bars.
+const LAYOUT_OPTIONS = [
+  { id: 'split', label: 'Cam + gameplay' },
+  { id: 'letterbox', label: 'Full frame' },
+];
+
 // When finished clips go out: inside prime-time windows (can be hours later)
 // or as soon as the minimum gap allows (never 01:00-08:00).
 const POST_TIMING_OPTIONS = [
@@ -117,6 +125,8 @@ function MonitorSettings({ monitor, onApply, applying }) {
   const [chatSignal, setChatSignal] = useState(cfg.chat_signal !== false);
   const [chatSignalTouched, setChatSignalTouched] = useState(false);
   const [reviewMin, setReviewMin] = useState(typeof cfg.review_minutes === 'number' ? String(cfg.review_minutes) : '');
+  const [layout, setLayout] = useState(cfg.layout === 'letterbox' ? 'letterbox' : 'split');
+  const [layoutTouched, setLayoutTouched] = useState(false);
 
   const apply = () => {
     const partial = {};
@@ -138,6 +148,7 @@ function MonitorSettings({ monitor, onApply, applying }) {
     if (maxPerDay !== '') partial.max_posts_per_day = clampPostsPerDay(maxPerDay);
     if (chatSignalTouched) partial.chat_signal = chatSignal;
     if (reviewMin !== '') partial.review_minutes = clampReviewMinutes(reviewMin);
+    if (layoutTouched) partial.layout = layout;
     onApply(monitor.id, partial);
   };
 
@@ -212,6 +223,12 @@ function MonitorSettings({ monitor, onApply, applying }) {
         <Segmented full value={String(zoom)}
           onChange={(v) => { setZoom(Number(v)); setZoomTouched(true); }}
           options={ZOOM_OPTIONS} />
+      </div>
+      <div className="field">
+        <span className="field-label">Layout</span>
+        <Segmented full value={layout}
+          onChange={(v) => { setLayout(v); setLayoutTouched(true); }}
+          options={LAYOUT_OPTIONS} />
       </div>
       <div className="field">
         <span className="field-label">Post timing</span>
@@ -381,6 +398,7 @@ export function LiveMonitorView({ pushToast }) {
   const [maxPerDay, setMaxPerDay] = useState(6);
   const [chatSignal, setChatSignal] = useState(true);
   const [reviewMin, setReviewMin] = useState(15);
+  const [layout, setLayout] = useState('split');
   const [catchup, setCatchup] = useState('backfill');
   const [clipSelection, setClipSelection] = useState('fixed');
   const [maxClips, setMaxClips] = useState(5);
@@ -429,6 +447,7 @@ export function LiveMonitorView({ pushToast }) {
         post_timing: postTiming,
         max_posts_per_day: clampPostsPerDay(maxPerDay),
         review_minutes: clampReviewMinutes(reviewMin),
+        layout,
         chat_signal: !isVod && platform !== 'youtube' ? chatSignal : false,
         caption_template: captionTemplate,
         title_template: titleTemplate,
@@ -619,6 +638,16 @@ export function LiveMonitorView({ pushToast }) {
             {clipSelection === 'auto'
               ? 'Publishes only the clips scoring above the floor — a weak segment yields fewer, or none.'
               : 'Always publishes the top clips of each segment by viral score.'}
+          </div>
+        </div>
+
+        <div className="field">
+          <span className="field-label">Layout</span>
+          <Segmented full value={layout} onChange={setLayout} options={LAYOUT_OPTIONS} />
+          <div className="od">
+            {layout === 'split'
+              ? 'Streamer cam on top, gameplay filling the bottom. Finds the cam by itself; clips without a steady cam use the full frame.'
+              : 'Whole stream frame between black bars, with the attribution banner.'}
           </div>
         </div>
 

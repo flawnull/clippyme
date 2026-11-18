@@ -414,6 +414,8 @@ class LiveMonitorStartRequest(BaseModel):
     max_posts_per_day: int = Field(6, ge=0, le=100)
     # Minutes a queued clip waits for review before it publishes (0 = none).
     review_minutes: int = Field(15, ge=0, le=1440)
+    # "split": facecam over gameplay; "letterbox": whole frame between bars.
+    layout: str = Field("split", pattern=r"^(split|letterbox)$")
 
     @field_validator("timezone")
     @classmethod
