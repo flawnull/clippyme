@@ -100,6 +100,12 @@ def test_stop_malformed_json_400():
 
 
 class _QueueMonitor(_FakeMonitor):
+    def approve_publication(self, publication_id):
+        from clippyme.core.errors import NotFoundError
+        if publication_id != "22222222-2222-2222-2222-222222222222":
+            raise NotFoundError("no queued clip")
+        return {"approved": publication_id, "pending_publish": 1}
+
     def discard_publication(self, publication_id):
         from clippyme.core.errors import ConflictError, NotFoundError
         if publication_id == "11111111-1111-1111-1111-111111111111":
@@ -130,3 +136,16 @@ def test_discard_pending_clip_untrusted_origin_rejected():
     client = TestClient(app_module.app, headers={"Origin": "https://evil.example"})
     r = client.post("/api/live-monitor/kick:foo/pending/22222222-2222-2222-2222-222222222222/discard")
     assert r.status_code in (403, 400)
+
+
+def test_post_now_route(monkeypatch):
+    # The live-monitor routes share one 10/min bucket; earlier tests here use it.
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "0")
+    app_module.live_monitor._monitors["kick:foo"] = _QueueMonitor()
+    client = TestClient(app_module.app, headers=ORIGIN)
+    base = "/api/live-monitor/kick:foo/pending"
+    ok = client.post(f"{base}/22222222-2222-2222-2222-222222222222/publish")
+    assert ok.status_code == 200 and ok.json()["approved"].startswith("2222")
+    assert client.post(f"{base}/33333333-3333-3333-3333-333333333333/publish").status_code == 404
+    evil = TestClient(app_module.app, headers={"Origin": "https://evil.example"})
+    assert evil.post(f"{base}/22222222-2222-2222-2222-222222222222/publish").status_code in (400, 403)

@@ -17,6 +17,7 @@ vi.mock('../../api/client', () => ({
   updateMonitorConfig: vi.fn(async () => ({ monitor: {} })),
   setMonitorPublishing: vi.fn(async () => ({ publishing_enabled: true })),
   discardPendingClip: vi.fn(async () => ({ discarded: 'p-1', pending_publish: 1 })),
+  publishPendingClip: vi.fn(async () => ({ approved: 'p-1', pending_publish: 1 })),
   listFonts: vi.fn(async () => ({ fonts: [] })),
 }));
 
@@ -492,4 +493,23 @@ test('queued clip preview plays and downloads the composed file', async () => {
   const download = screen.getByRole('link', { name: 'Download Big moment' });
   expect(download.getAttribute('href')).toBe('/videos/monitor_kick_n3on/Big%20moment.mp4');
   expect(download).toHaveAttribute('download');
+});
+
+test('Post now posts one queued clip; an approved clip shows Posting…', async () => {
+  const client = await import('../../api/client');
+  mockStatus.mockResolvedValue({
+    monitors: [{ id: 'kick:n3on', platform: 'kick', mode: 'live', running: true, state: 'capturing',
+      channel: 'n3on', publishing_enabled: false, pending_publish: 2,
+      pending_clips: [
+        { publication_id: 'p-1', title: 'Big moment', viral_score: 88, state: 'queued', approved: false,
+          preview_url: '/videos/m/a.mp4' },
+        { publication_id: 'p-2', title: 'Already sent', viral_score: 80, state: 'queued', approved: true,
+          preview_url: '/videos/m/b.mp4' },
+      ] }],
+  });
+  render(<LiveMonitorView />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Post Big moment now' }));
+  await waitFor(() => expect(client.publishPendingClip).toHaveBeenCalledWith('kick:n3on', 'p-1'));
+  expect(screen.getByRole('button', { name: 'Post Already sent now' })).toBeDisabled();
+  expect(screen.getByText(/posting soon/)).toBeInTheDocument();
 });

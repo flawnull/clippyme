@@ -118,6 +118,12 @@ flowchart LR
   copy; the clip stays in its job for History and manual publishing. A clip
   already `in_flight` answers 409. The drain re-checks the queue after its
   spacing sleep, so a clip discarded during that sleep is never published.
+- **Post now** (`POST /api/live-monitor/{id}/pending/{publication_id}/publish`)
+  marks one queued clip `approved`: it skips its review window and retry
+  wait, is published even while auto-publish is off, and is scheduled `asap`
+  whatever the monitor's post timing. Spacing and the daily cap still apply.
+  The drain treats an entry as publishable when auto-publish is on or the
+  entry is approved, so pausing never drops an approved clip.
 - A publication has a stable `publication_id` and a `request_id` used as the
   Zernio `Idempotency-Key`. Retries back off from 60 s to 1 h, at most 8
   attempts. Identity and idempotency rules are in

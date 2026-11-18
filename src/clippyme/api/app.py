@@ -935,6 +935,17 @@ async def live_monitor_set_publishing(monitor_id: str, request: Request):
     return {"monitor": live_monitor.set_publishing(monitor_id, req.enabled)}
 
 
+@app.post("/api/live-monitor/{monitor_id}/pending/{publication_id}/publish")
+async def live_monitor_publish_pending(monitor_id: str, publication_id: str, request: Request):
+    """Post one queued clip now, even with auto-publish off. 409 while it is
+    already being published."""
+    require_trusted_config_request(request)
+    enforce_rate_limit(request, "livemonitor", capacity=10, refill_per_sec=10 / 60)
+    if not _PUBLICATION_ID_RE.fullmatch(publication_id):
+        raise HTTPException(status_code=400, detail="invalid publication id")
+    return live_monitor.approve_publication(monitor_id, publication_id)
+
+
 @app.post("/api/live-monitor/{monitor_id}/pending/{publication_id}/discard")
 async def live_monitor_discard_pending(monitor_id: str, publication_id: str, request: Request):
     """Drop one queued clip so the monitor never auto-publishes it. The clip
