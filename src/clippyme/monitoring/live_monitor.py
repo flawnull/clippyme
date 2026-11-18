@@ -494,8 +494,20 @@ DEFAULT_POST_TIMING = "asap"
 # steady camera is found); "letterbox": the whole frame between black bars.
 LAYOUTS = ("split", "letterbox")
 DEFAULT_LAYOUT = "split"
+# Transcription language. Auto-detect ("multi") misread loud English gaming
+# streams as other languages, and Gemini writes titles, hooks and captions in
+# the transcript's language, so monitors default to English.
+DEFAULT_LANGUAGE = "en"
 DEFAULT_MAX_POSTS_PER_DAY = 6
 DEFAULT_REVIEW_MINUTES = 15
+
+
+def _validate_language(value) -> str:
+    from clippyme.jobs.job_results import ALLOWED_LANGUAGES
+    lang = str(value or DEFAULT_LANGUAGE).strip()
+    if lang not in ALLOWED_LANGUAGES:
+        raise ValidationError(f"unsupported language: {lang!r}")
+    return lang
 
 
 def _validate_layout(value) -> str:
@@ -630,6 +642,7 @@ def validate_monitor_config(config: dict, default_timezone: str = "Europe/Rome")
         "review_minutes": _clamp_int(config.get("review_minutes"),
                                      DEFAULT_REVIEW_MINUTES, 0, 1440),
         "layout": _validate_layout(config.get("layout")),
+        "language": _validate_language(config.get("language")),
     }
 
 
@@ -641,7 +654,7 @@ _UPDATABLE_CONFIG_FIELDS = (
     "segment_seconds", "prelive_skip_seconds", "platforms", "banner", "compose",
     "poll_interval", "delete_after_publish", "max_clips", "clip_selection",
     "min_viral_score", "smart_cut", "letterbox_zoom", "chat_signal",
-    "post_timing", "max_posts_per_day", "review_minutes", "layout",
+    "post_timing", "max_posts_per_day", "review_minutes", "layout", "language",
 )
 
 # The full set of cfg keys worth persisting/restoring (mirrors
@@ -653,6 +666,7 @@ _SNAPSHOT_CONFIG_FIELDS = (
     "banner", "compose", "catchup", "delete_after_publish", "max_clips",
     "clip_selection", "min_viral_score", "smart_cut", "letterbox_zoom",
     "chat_signal", "post_timing", "max_posts_per_day", "review_minutes", "layout",
+    "language",
 )
 
 
@@ -1798,6 +1812,7 @@ class LiveMonitor:
                              reframe_mode="disabled",
                              letterbox_zoom=self.cfg.get("letterbox_zoom") or 0,
                              instructions=instructions,
+                             language=self._job_language(),
                              monitor=True)
         # input_path: the segment IS the job's source — recording it makes the
         # job resumable after a restart and protects the file from the upload
@@ -1831,6 +1846,7 @@ class LiveMonitor:
                              letterbox_zoom=self.cfg.get("letterbox_zoom") or 0,
                              start_offset=self._vod_start_offset(),
                              instructions=self.cfg.get("instructions") or None,
+                             language=self._job_language(),
                              monitor=True)
         await submit_job(
             jobs=self._jobs, job_queue=self._job_queue, job_id=job_id,
@@ -2179,6 +2195,12 @@ class LiveMonitor:
                 await self._record_publish_failure(entry, exc, clip_path)
                 return
             await self._on_publish_accepted(entry, clip_path, result)
+
+    def _job_language(self) -> str | None:
+        """Transcription language for this monitor's jobs; None lets the
+        provider auto-detect (``multi``)."""
+        lang = self.cfg.get("language") or DEFAULT_LANGUAGE
+        return None if lang in ("multi", "auto") else lang
 
     def _local_today(self) -> date:
         from zoneinfo import ZoneInfo

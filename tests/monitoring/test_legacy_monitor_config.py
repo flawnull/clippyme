@@ -73,3 +73,28 @@ def test_auto_resume_revalidates_a_legacy_snapshot(tmp_path, monkeypatch):
         await reg.shutdown()
 
     asyncio.run(scenario())
+
+
+def test_monitor_jobs_transcribe_in_english_by_default(tmp_path):
+    """Reported: auto-detect turned English GTA streams into other-language
+    subtitles and titles."""
+    import asyncio
+    from clippyme.monitoring.live_monitor import LiveMonitor
+    mon = LiveMonitor(id="twitch:kaicenat", jobs={}, job_queue=None, output_dir=str(tmp_path / "out"))
+    mon.cfg = validate_monitor_config({"platform": "twitch", "channel": "kaicenat", "timezone": "UTC",
+                                       "platforms": [{"platform": "tiktok", "accountId": "a"}]},
+                                      default_timezone="UTC")
+    mon._gemini_key = "k"
+    seg = tmp_path / "seg.mp4"
+    seg.write_bytes(b"x")
+
+    async def submit():
+        mon._job_queue = asyncio.Queue()
+        return await mon._submit_segment_job(str(seg))
+
+    cmd = mon._jobs[asyncio.run(submit())]["cmd"]
+    assert cmd[cmd.index("--language") + 1] == "en"
+    assert _legacy_cfg() and validate_monitor_config(_legacy_cfg())["language"] == "en"
+    auto = validate_monitor_partial_update({"language": "multi"}, mon.cfg)
+    mon.cfg = auto
+    assert mon._job_language() is None
