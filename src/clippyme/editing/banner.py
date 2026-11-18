@@ -170,6 +170,12 @@ def _rasterize_logo(platform: str, height: int) -> str | None:
                 os.remove(tmp_path)
 
 
+# Logo height on a 1080 px wide frame; the handle text and padding scale with
+# it. 56 out-shouted the captions on phone screens, so the pill is a credit
+# line now, not a headline.
+BANNER_LOGO_HEIGHT = 38
+
+
 def render_banner_png(platform, handle, width, out_path) -> tuple[str, int, int]:
     """Render the transparent attribution pill and return path/width/height."""
     from PIL import Image, ImageDraw, ImageFont
@@ -177,7 +183,7 @@ def render_banner_png(platform, handle, width, out_path) -> tuple[str, int, int]
     from clippyme.editing.hook_overlay import _resolve_hook_font_path
 
     text = banner_text(platform, handle) or ""
-    logo_h = max(8, int(width * 56 / 1080))
+    logo_h = max(8, int(width * BANNER_LOGO_HEIGHT / 1080))
     font_size = max(10, int(logo_h * 0.72))
     pad_x = max(8, int(logo_h * 0.32))
     pad_y = max(4, int(logo_h * 0.18))
