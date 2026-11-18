@@ -1107,6 +1107,7 @@ class LiveMonitor:
         # vod poller runs forever — both are durable across a process
         # restart, so mark them for registry.auto_resume() on next startup.
         self.resume_on_start = bool(cfg.get("loop")) or self.mode == "vod"
+        self._sweep_orphan_segments()
         self._strategy = self._make_strategy(cfg, pc)
         self._scheduler = SharedGapScheduler(
             min_gap_seconds=cfg["min_gap_seconds"], picked_slots=self._picked_slots)
@@ -2445,8 +2446,9 @@ class LiveMonitor:
         Synchronous on purpose: the check and the removal run without an
         await, so no drain can start publishing the entry in between. An
         entry already in flight is refused (Zernio may be accepting it). The
-        clip itself stays in its job, visible in History for manual use; only
-        the monitor's composed copy is deleted.
+        clip's files are deleted to free the disk: the monitor's composed
+        copy now, the job's raw clip, source slice, cover and composed file
+        under the clip lock (same cleanup as after a publish).
         """
         entry = next((e for e in self._pending_publish
                       if e.get("publication_id") == publication_id), None)
@@ -2459,9 +2461,49 @@ class LiveMonitor:
         composed = entry.get("composed_path") or ""
         if composed and os.path.dirname(os.path.abspath(composed)) == os.path.abspath(self._clip_dir):
             _safe_remove(composed)
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:  # no running loop (tests, scripts): delete now
+            self._delete_clip_artifacts(entry["job_id"], entry.get("clip") or {},
+                                        self._clip_path(entry), composed)
+        else:
+            self._track_task(loop.create_task(self._delete_discarded_files(entry)))
         logger.info("LiveMonitor %s: discarded queued clip %s (%s/%s)", self.id, publication_id,
                     entry.get("job_id"), (entry.get("clip") or {}).get("original_index"))
         return {"discarded": publication_id, "pending_publish": len(self._pending_publish)}
+
+    async def _delete_discarded_files(self, entry: dict) -> None:
+        async with self._clip_lock(entry["job_id"], entry.get("clip") or {}):
+            await asyncio.to_thread(
+                self._delete_clip_artifacts, entry["job_id"], entry.get("clip") or {},
+                self._clip_path(entry), entry.get("composed_path") or "")
+
+    def _sweep_orphan_segments(self) -> int:
+        """Delete this monitor's recordings that no job owns: captures cut off
+        by a restart are never processed, and at 1-2 GB each they fill the
+        disk. Runs at start, before any new capture. Returns the count."""
+        prefix = f"live_{self.platform}_{self.cfg.get('channel')}_"
+        keep = {os.path.abspath(p) for p in self._inflight_jobs.values() if p}
+        keep |= {os.path.abspath(j["input_path"]) for j in self._jobs.values()
+                 if isinstance(j, dict) and j.get("input_path")}
+        removed = 0
+        try:
+            names = os.listdir(self._upload_dir)
+        except OSError:
+            return 0
+        for name in names:
+            if not name.startswith(prefix):
+                continue
+            path = os.path.abspath(os.path.join(self._upload_dir, name))
+            base = path[:-4] if path.endswith(".log") else path
+            if base in keep:
+                continue
+            _safe_remove(path)
+            removed += 1
+        if removed:
+            logger.info("LiveMonitor %s: removed %d unfinished recording file(s) left by a restart",
+                        self.id, removed)
+        return removed
 
     async def _drain_pending(self) -> None:
         """Single consumer of the durable publish queue.

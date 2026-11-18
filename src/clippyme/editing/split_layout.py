@@ -26,10 +26,14 @@ logger = logging.getLogger("clippyme")
 
 OUT_W, OUT_H = 1080, 1920
 # Share of the frame height given to the camera band (the rest is gameplay).
-TOP_FRACTION = 0.38
+TOP_FRACTION = 0.33
 # Crop width around a detected face, in face widths: head and shoulders, and
 # narrow enough to stay inside a typical webcam overlay.
-FACE_WIDTHS = 2.8
+FACE_WIDTHS = 3.6
+# A webcam overlay is small (often ~480 px wide on a 1080p stream); stretching
+# a tight face crop to 1080 px blurs it. The crop is widened until the upscale
+# is at most this factor, but kept inside the estimated overlay.
+MAX_UPSCALE = 2.5
 # Frames sampled for detection, and how many must agree on the camera spot.
 SAMPLES = 8
 MIN_AGREEING = 4
@@ -82,7 +86,9 @@ def cam_box(face, src_w: int, src_h: int, top_h: int, out_w: int = OUT_W):
     """Crop ``(x, y, w, h)`` around the face with the camera band's aspect."""
     fx, fy, fw, fh = face
     aspect = out_w / top_h
-    w = min(fw * FACE_WIDTHS, src_w, src_h * aspect)
+    overlay_w = overlay_box(face, src_w, src_h)[2]
+    w = max(fw * FACE_WIDTHS, min(out_w / MAX_UPSCALE, overlay_w))
+    w = min(w, src_w, src_h * aspect)
     h = w / aspect
     cx, cy = fx + fw / 2, fy + fh / 2 + fh * 0.15  # a little below the eyes
     x = min(max(0, cx - w / 2), src_w - w)
@@ -126,7 +132,8 @@ def build_filter(cam, game, top_h: int, bottom_h: int, out_w: int = OUT_W) -> st
     cx, cy, cw, ch = cam
     gx, gy, gw, gh = game
     return (f"[0:v]split=2[c][g];"
-            f"[c]crop={cw}:{ch}:{cx}:{cy},scale={out_w}:{top_h}:flags=lanczos,setsar=1[top];"
+            f"[c]crop={cw}:{ch}:{cx}:{cy},scale={out_w}:{top_h}:flags=lanczos,"
+            f"unsharp=5:5:0.6:5:5:0.0,setsar=1[top];"
             f"[g]crop={gw}:{gh}:{gx}:{gy},scale={out_w}:{bottom_h}:flags=lanczos,setsar=1[bot];"
             f"[top][bot]vstack=inputs=2[v]")
 

@@ -13,7 +13,9 @@ platform) and submits ordinary jobs through the same queue as the dashboard.
 | Twitch | Same as Kick (Helix app credentials required) | Processes each new VOD |
 | YouTube | — | New long-form uploads from the channel's RSS feed (Shorts are excluded by the feed choice), from activation onward |
 
-Several monitors run at once, one per platform + channel. State survives
+Several monitors run at once, one per platform + channel. On start, a monitor
+deletes its own `live_<platform>_<channel>_*` recordings in `uploads/` that no
+in-flight job owns: captures cut off by a restart are never processed. State survives
 restarts in `data/live_monitor.json`; monitors marked `resume_on_start` start
 again automatically.
 
@@ -123,8 +125,9 @@ flowchart LR
 - While clips wait, the dashboard lists them (`pending_clips` in the monitor
   status) with a preview and a Discard button
   (`POST /api/live-monitor/{id}/pending/{publication_id}/discard`). Discarding
-  removes the entry from the persisted queue and deletes the monitor's composed
-  copy; the clip stays in its job for History and manual publishing. A clip
+  removes the entry from the persisted queue and deletes the clip's files (the
+  monitor's composed copy, then under the clip lock the job's raw clip, source
+  slice, cover and composed file) to free the disk. A clip
   already `in_flight` answers 409. The drain re-checks the queue after its
   spacing sleep, so a clip discarded during that sleep is never published.
 - **Post now** (`POST /api/live-monitor/{id}/pending/{publication_id}/publish`)
