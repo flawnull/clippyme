@@ -82,7 +82,15 @@ again automatically.
   (`monitoring/language_fix.py`): it re-transcribes the clip's source slice
   when the job's transcript was not locked to the language, has Gemini
   rewrite the title, hook and captions, marks the clip `subtitle_language`,
-  and re-renders it. `multi` keeps auto-detection.
+  and re-renders it. After startup, a background sweep does the same for
+  every other History clip (one Gemini call per job, a job every 20 s,
+  skipping running jobs, clips a monitor holds and jobs locked to another
+  language on purpose) and deletes stale rendered copies; subtitles are
+  burned in from the transcript at render time, so later renders, downloads
+  and publishes are in English. A clip is marked only when both its
+  subtitles and text are done; the sweep pauses after two jobs without
+  progress (Gemini quota, missing keys) and resumes at the next start.
+  `multi` keeps auto-detection.
 - **Runtime config**: `POST /api/live-monitor/{id}/config` changes an
   allow-listed set of fields (templates, instructions, spacing, segment
   length, platforms, look, chat signal); changes apply to future clips. Platform, mode and
