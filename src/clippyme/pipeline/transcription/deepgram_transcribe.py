@@ -75,6 +75,8 @@ from typing import Any
 
 import requests
 
+from clippyme.pipeline.language import job_language
+
 logger = logging.getLogger("clippyme")
 
 DEEPGRAM_API_URL = "https://api.deepgram.com/v1/listen"
@@ -406,7 +408,7 @@ def _post_with_retries(
     raise DeepgramError("Deepgram transcription failed: retries exhausted")
 
 
-def transcribe_with_deepgram(video_path: str) -> dict[str, Any]:
+def transcribe_with_deepgram(video_path: str, language: str | None = None) -> dict[str, Any]:
     """Transcribe a local audio/video file via Deepgram's pre-recorded API.
 
     Returns a dict matching ``main.transcribe_video``'s shape. Raises
@@ -420,7 +422,10 @@ def transcribe_with_deepgram(video_path: str) -> dict[str, Any]:
     size_bytes = _check_file(video_path)
 
     model = os.getenv("DEEPGRAM_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
-    language = os.getenv("DEEPGRAM_LANGUAGE", DEFAULT_LANGUAGE).strip()
+    # A per-job language (live monitor default "en") wins over the global
+    # default, so multilingual detection can't turn English speech into
+    # Spanish or Italian subtitles.
+    language = language or job_language() or os.getenv("DEEPGRAM_LANGUAGE", DEFAULT_LANGUAGE).strip()
     timeout = float(os.getenv("DEEPGRAM_HTTP_TIMEOUT", str(DEFAULT_TIMEOUT)))
     max_retries = int(os.getenv("DEEPGRAM_MAX_RETRIES", str(DEFAULT_MAX_RETRIES)))
 

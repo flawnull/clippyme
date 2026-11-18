@@ -73,6 +73,8 @@ from typing import Any
 
 import requests
 
+from clippyme.pipeline.language import job_language
+
 logger = logging.getLogger("clippyme")
 
 ELEVENLABS_STT_URL = "https://api.elevenlabs.io/v1/speech-to-text"
@@ -420,7 +422,7 @@ def transcribe_with_elevenlabs(video_path: str) -> dict[str, Any]:
     size_bytes = _check_file(video_path)
 
     model = (os.getenv("ELEVENLABS_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL)
-    language = (os.getenv("ELEVENLABS_LANGUAGE", "") or "").strip()
+    language = job_language() or (os.getenv("ELEVENLABS_LANGUAGE", "") or "").strip()
     timeout = float(os.getenv("ELEVENLABS_HTTP_TIMEOUT", str(DEFAULT_TIMEOUT)))
     max_retries = int(os.getenv("ELEVENLABS_MAX_RETRIES", str(DEFAULT_MAX_RETRIES)))
 

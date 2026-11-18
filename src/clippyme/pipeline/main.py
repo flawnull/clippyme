@@ -148,6 +148,7 @@ from clippyme.pipeline.download import (  # noqa: E402
 # Audio normalize + Ken Burns zoom live in a cv2-free, host-testable module.
 from clippyme.pipeline.postprocess import normalize_audio, apply_subtle_zoom  # noqa: E402
 from clippyme.pipeline.analysis import texttiling_ops  # noqa: E402
+from clippyme.pipeline.language import job_language  # noqa: E402
 
 
 
@@ -789,10 +790,15 @@ if __name__ == '__main__':
     else:
         # 3. Transcribe (with cache for URL-based jobs)
         cached = _load_cached_transcript(args.url) if args.url else None
-        if cached:
+        # A transcript cached under another language setting is not reused:
+        # a forced "en" job must not inherit an auto-detected Spanish one.
+        if cached and cached.get("forced_language") == job_language():
             transcript = cached
         else:
             transcript = transcribe_video(input_video)
+            # Marks which language the words were locked to, so the live
+            # monitor knows these clips need no English re-transcription.
+            transcript["forced_language"] = job_language()
             if args.url:
                 _save_transcript_cache(args.url, transcript)
 
