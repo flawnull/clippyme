@@ -73,6 +73,16 @@ again automatically.
   hooks, scores of 72-90 by spike strength, the same `max_clips` and score
   floor as a Gemini result, and `clip_source: chat_fallback` in the metadata.
   They then go through the normal snapping, rendering and publishing.
+- **Language** (`language`, default `en`): monitor jobs run with
+  `--language`, which locks Deepgram, ElevenLabs and Whisper to that language
+  (`pipeline/language.py`) and tells Gemini to write titles, hooks and
+  captions in it even when the speech drifts into another language.
+  Transcripts record it as `forced_language`. On start, a monitor repairs
+  queued and failed clips made before this was enforced
+  (`monitoring/language_fix.py`): it re-transcribes the clip's source slice
+  when the job's transcript was not locked to the language, has Gemini
+  rewrite the title, hook and captions, marks the clip `subtitle_language`,
+  and re-renders it. `multi` keeps auto-detection.
 - **Runtime config**: `POST /api/live-monitor/{id}/config` changes an
   allow-listed set of fields (templates, instructions, spacing, segment
   length, platforms, look, chat signal); changes apply to future clips. Platform, mode and

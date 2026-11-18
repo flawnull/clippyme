@@ -11,6 +11,8 @@ import datetime
 import json
 import time
 
+from clippyme.pipeline.language import job_language, language_name
+
 # Paid-tier Standard pricing, USD per 1M tokens, text input. Thinking tokens
 # are billed at the output rate. Source: ai.google.dev/gemini-api/docs/pricing
 # (checked 2026-09-28) — update when Google changes rates. "long": rates once
@@ -135,11 +137,11 @@ normally on the words alone.
     * Warning / callout: "Non guardare se…", "Stop scrolling if…"
     * Stakes / consequence: "Dopo questo può smettere", "This ends his career"
     * Prediction bait: "Indovina quanto vale", "Guess the number"
-  The hook must TEASE the content of the clip without spoiling the payoff. Same language as the transcript. Title Case or Sentence case, never ALL CAPS.
+  The hook must TEASE the content of the clip without spoiling the payoff. {lang_phrase_cap}. Title Case or Sentence case, never ALL CAPS.
 - No generic intros/outros or pure sponsorship unless they ARE the hook
 
 ## LANGUAGE RULE
-Every text field (viral_reason, descriptions, titles, hook_text) MUST be in the SAME LANGUAGE as the transcript.
+{language_rule}
 
 ## SPEAKER ATTRIBUTION RULE (CRITICAL)
 The transcript carries NO reliable speaker identity — you cannot tell who is
@@ -289,11 +291,11 @@ Output schema:
       "start": 12.340,
       "end": 37.900,
       "viral_score": 87,
-      "viral_reason": "<>=20 chars, cite specific hook/payoff/quote, same language as transcript>",
+      "viral_reason": "<>=20 chars, cite specific hook/payoff/quote, {lang_phrase}>",
       "video_description_for_tiktok": "<TikTok description, ends with a genuine question or a debatable opinion — never mechanical engagement bait>",
       "video_description_for_instagram": "<Instagram description, ends with a genuine question or a debatable opinion — never mechanical engagement bait>",
       "video_title_for_youtube_short": "<max 100 chars, engagement-first bait per TITLE & CAPTION COPY — stakes/speculation/comment trigger, grounded in the clip, never a flat summary>",
-      "viral_hook_text": "<REQUIRED, 3-8 words, scroll-stopping overlay copy — NOT a transcript quote. Use curiosity gap, POV, counter-claim, question, number, or warning pattern. Same language as transcript.>"
+      "viral_hook_text": "<REQUIRED, 3-8 words, scroll-stopping overlay copy — NOT a transcript quote. Use curiosity gap, POV, counter-claim, question, number, or warning pattern. {lang_phrase_cap}.>"
     }}
   ]
 }}
@@ -354,7 +356,8 @@ def encode_words_toon(words):
     return "\n".join(lines)
 
 
-def build_viral_prompt(transcript_result, video_duration, instructions=None, creator=None):
+def build_viral_prompt(transcript_result, video_duration, instructions=None, creator=None,
+                       output_language=None):
     """Return ``(prompt, words)`` for the primary Gemini call.
 
     ``words`` is also what ``gemini_parser.backfill_hook_text`` needs later,
@@ -399,8 +402,28 @@ def build_viral_prompt(transcript_result, video_duration, instructions=None, cre
         words_toon=encode_words_toon(words),
         user_instructions_block=user_instructions_block,
         creator_block=creator_block,
+        **_language_fields(output_language if output_language is not None else job_language()),
     )
     return prompt, words
+
+
+def _language_fields(code):
+    """Template text for the language rule: forced language or transcript's."""
+    if not code:
+        return {
+            "language_rule": "Every text field (viral_reason, descriptions, titles, "
+                             "hook_text) MUST be in the SAME LANGUAGE as the transcript.",
+            "lang_phrase": "same language as transcript",
+            "lang_phrase_cap": "Same language as the transcript",
+        }
+    name = language_name(code)
+    return {
+        "language_rule": f"Every text field (viral_reason, descriptions, titles, hook_text) "
+                         f"MUST be written in {name}, even when the transcript or parts of "
+                         f"it are in another language. Translate quotes into {name}.",
+        "lang_phrase": f"written in {name}",
+        "lang_phrase_cap": f"Written in {name}",
+    }
 
 
 def is_rate_limit_error(exc) -> bool:

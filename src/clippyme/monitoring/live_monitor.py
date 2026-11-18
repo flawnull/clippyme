@@ -1190,6 +1190,8 @@ class LiveMonitor:
             # the release of their segment.
             for job_id, seg_path in list(self._inflight_jobs.items()):
                 self._track_task(asyncio.create_task(self._await_and_publish(job_id, seg_path)))
+            if self._pending_publish or self._failed_publish:
+                self._track_task(asyncio.create_task(self._fix_queue_language()))
         logger.info("LiveMonitor started: %s (mode=%s)", self.id, self.mode)
         return self.status()
 
@@ -2246,6 +2248,54 @@ class LiveMonitor:
                 await self._record_publish_failure(entry, exc, clip_path)
                 return
             await self._on_publish_accepted(entry, clip_path, result)
+
+    async def _fix_queue_language(self, fix=None) -> int:
+        """Once per clip: rewrite queued clips made before the monitor's
+        language was enforced (subtitles, title, hook, captions), then
+        re-render them. See ``monitoring/language_fix.py``. Returns the
+        number of clips repaired."""
+        from clippyme.monitoring.language_fix import fix_clip
+
+        language = self._job_language()
+        if not language:
+            return 0
+        fix = fix or fix_clip
+        fixed = 0
+        for entry in list(self._pending_publish) + list(self._failed_publish):
+            clip = entry.get("clip") or {}
+            idx = clip.get("original_index")
+            if idx is None or clip.get("subtitle_language") == language:
+                continue
+            async with self._clip_lock(entry["job_id"], clip):
+                if entry.get("state") == "in_flight":
+                    continue
+                if self._queue_index(entry) is None and entry not in self._failed_publish:
+                    continue  # posted or discarded meanwhile
+                try:
+                    changed = await asyncio.to_thread(
+                        fix, entry["job_id"], idx, self._output_dir, language)
+                except Exception:
+                    logger.exception("LiveMonitor %s: language fix failed for %s/%s",
+                                     self.id, entry["job_id"], idx)
+                    continue
+                if changed is None:
+                    continue
+                clip.update(changed)
+                clip["subtitle_language"] = language
+                old = entry.get("composed_path")
+                entry["composed_path"] = None
+                if old and os.path.isfile(old):
+                    with contextlib.suppress(OSError):
+                        os.remove(old)
+                try:
+                    entry["composed_path"] = await self._compose_for_publish(entry["job_id"], clip)
+                except Exception:
+                    pass  # the drain recomposes a clip with no composed file
+                fixed += 1
+                self._persist()
+        if fixed:
+            logger.info("LiveMonitor %s: %d queued clip(s) redone in %s", self.id, fixed, language)
+        return fixed
 
     def _job_language(self) -> str | None:
         """Transcription language for this monitor's jobs; None lets the
