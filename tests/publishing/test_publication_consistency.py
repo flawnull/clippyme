@@ -484,7 +484,7 @@ def _owning_monitor(outputs, state=None, inflight=False):
     return mon
 
 
-@pytest.mark.parametrize("how", ["job_not_handed_off", "queued", "in_flight", "retry_wait",
+@pytest.mark.parametrize("how", ["job_not_handed_off", "in_flight", "retry_wait",
                                  "stopped_monitor_queue"])
 def test_manual_publish_of_a_clip_the_monitor_still_owns_is_refused(api, how):
     outputs, uploads = api
@@ -500,6 +500,17 @@ def test_manual_publish_of_a_clip_the_monitor_still_owns_is_refused(api, how):
 
     assert r.status_code == 409, r.text
     assert uploads == []
+
+
+def test_manual_publish_takes_over_a_never_attempted_queued_clip(api):
+    """Owner request: publishing a queued clip by hand hands it over instead of
+    a 409; the monitor's queue no longer holds it, so it posts only once."""
+    outputs, uploads = api
+    mon = _owning_monitor(outputs, state="queued")
+    app_module.live_monitor._monitors["twitch:foo"] = mon
+    r = TestClient(app_module.app, headers=ORIGIN).post(f"/api/publish/{JOB}/0", json=PUBLISH)
+    assert r.status_code == 200, r.text
+    assert len(uploads) == 1 and mon._pending_publish == []
 
 
 def test_manual_publish_stays_open_for_other_clips_and_failed_items(api):

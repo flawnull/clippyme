@@ -140,8 +140,11 @@ Breaking one of these is a bug even if tests pass.
   publish derives its key from `(job_id, clip_index, intent_id)`; no
   `intent_id` = no key. Delivery is at least once. Details:
   [docs/architecture/publishing.md](docs/architecture/publishing.md).
-- **Manual publish vs monitor**: 409 while `LiveMonitorRegistry.publication_owner`
-  says the monitor owns the clip.
+- **Manual publish vs monitor**: a manual publish of a clip waiting in a
+  running monitor's queue takes it over (`release_for_manual_publish` dequeues
+  it first) only while the entry is `queued` with no attempt yet; 409 for
+  `in_flight` / `retry_wait` (an earlier attempt may exist at Zernio), a job
+  not handed off yet, or a stopped monitor's snapshot.
 - **Published clips**: after a confirmed monitor publish, artifacts are deleted
   and the entry marked `deleted_after_publish`; `shorts` positions never
   shift, consumers pass `original_index`.

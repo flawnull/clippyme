@@ -373,13 +373,16 @@ def test_partial_update_allows_banner_and_compose():
     assert new_cfg["compose"] == {"toggles": {"hook": False}}
 
 
-def test_delete_after_publish_defaults_on():
-    assert validate_monitor_config(_base_cfg())["delete_after_publish"] is True
+def test_delete_after_publish_defaults_off():
+    """Published clips stay in History so they can be re-posted (owner request)."""
+    assert validate_monitor_config(_base_cfg())["delete_after_publish"] is False
 
 
 def test_delete_after_publish_is_updatable_and_snapshotted():
     assert "delete_after_publish" in _SNAPSHOT_CONFIG_FIELDS
     current = _running_cfg()
+    assert current["delete_after_publish"] is False
+    current = validate_monitor_partial_update({"delete_after_publish": True}, current)
     assert current["delete_after_publish"] is True
     new_cfg = validate_monitor_partial_update({"delete_after_publish": False}, current)
     assert new_cfg["delete_after_publish"] is False
@@ -1170,6 +1173,7 @@ def test_drain_recomposes_missing_composed_path_and_survives_failure(tmp_path, m
     assert mon.clips_published == 2
 
 
+@pytest.mark.usefixtures("instant_publish_defaults")  # deletion on
 def test_successful_publish_deletes_clip_files_and_empty_dir(tmp_path, monkeypatch):
     """A published clip's artifacts are removed; when it was the last clip the
     whole job dir goes away. The consolidated per-monitor composed file is
@@ -1204,6 +1208,7 @@ def test_successful_publish_deletes_clip_files_and_empty_dir(tmp_path, monkeypat
     assert not composed.exists()         # consolidated file removed too
 
 
+@pytest.mark.usefixtures("instant_publish_defaults")  # deletion on
 def test_successful_publish_keeps_dir_and_marks_metadata_when_clips_remain(tmp_path, monkeypatch):
     """Deleting one clip marks its metadata entry and leaves siblings intact."""
     import asyncio

@@ -541,6 +541,9 @@ DEFAULT_LAYOUT = "split"
 # streams as other languages, and Gemini writes titles, hooks and captions in
 # the transcript's language, so monitors default to English.
 DEFAULT_LANGUAGE = "en"
+# Keep a published clip's files so it can be posted again (another platform,
+# a retry) from History. Off by default since owners re-post; clips are ~50 MB.
+DEFAULT_DELETE_AFTER_PUBLISH = False
 DEFAULT_MAX_POSTS_PER_DAY = 6
 DEFAULT_REVIEW_MINUTES = 15
 
@@ -651,7 +654,8 @@ def validate_monitor_config(config: dict, default_timezone: str = "Europe/Rome")
         # Whether a confirmed Zernio publish deletes the job's raw clip
         # artifacts. Default ON (frees disk); flip off to keep them for
         # manual QA/re-edit at the cost of storage.
-        "delete_after_publish": _validate_bool(config.get("delete_after_publish"), "delete_after_publish", default=True),
+        "delete_after_publish": _validate_bool(config.get("delete_after_publish"), "delete_after_publish",
+                                               default=DEFAULT_DELETE_AFTER_PUBLISH),
         # Max clips kept per segment (top-N by viral_score) — bounds a
         # publish-limited monitor's output. Default 5; 0 = NO cap (every clip
         # the segment yields gets published). In "auto" selection it stays the
@@ -2442,7 +2446,7 @@ class LiveMonitor:
             except Exception:
                 logger.warning("LiveMonitor %s: publish record failed for %s",
                                self.id, clip_path, exc_info=True)
-        if not self.cfg.get("delete_after_publish", True):
+        if not self.cfg.get("delete_after_publish", DEFAULT_DELETE_AFTER_PUBLISH):
             # User opted to keep raw artifacts around (QA/re-edit) — clip is
             # still recorded as published above so it's never re-published.
             return
@@ -2935,6 +2939,29 @@ class LiveMonitorRegistry:
         if mon is None:
             raise NotFoundError(f"no such monitor: {monitor_id}")
         return mon.discard_publication(publication_id)
+
+    def release_for_manual_publish(self, job_id: str, clip_index: int) -> bool:
+        """Hand a queued clip over to a manual publish: drop it from its
+        running monitor's queue so it is never auto-posted as well. False when
+        it can't be released: only a never-attempted ``queued`` entry is; one
+        in flight or in retry_wait may already exist at Zernio (an ambiguous
+        earlier attempt), so a manual post could duplicate it. Also False for
+        a job not handed off yet or a stopped monitor's snapshot."""
+        for mon in self._monitors.values():
+            if job_id in mon._inflight_jobs:
+                return False
+            for entry in list(mon._pending_publish):
+                clip = entry.get("clip") or {}
+                if (entry.get("job_id") == job_id
+                        and clip.get("original_index", clip.get("index")) == clip_index):
+                    if entry.get("state", "queued") != "queued" or int(entry.get("attempts") or 0):
+                        return False
+                    mon._dequeue(entry)
+                    mon._persist()
+                    logger.info("LiveMonitor %s: queued clip %s/%s handed to a manual publish",
+                                mon.id, job_id, clip_index)
+                    return True
+        return False
 
     def publication_owner(self, job_id: str, clip_index: int) -> str | None:
         """Id of the monitor that still owns this clip's automatic publication

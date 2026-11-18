@@ -853,11 +853,13 @@ async def publish_clip_endpoint(job_id: str, clip_index: int, req: PublishReques
     if (jobs.get(job_id) or {}).get("status") in job_control.ACTIVE_STATES:
         raise HTTPException(status_code=409, detail="Job is still processing; publish once it has finished")
     owner = live_monitor.publication_owner(job_id, clip_index)
+    if owner and live_monitor.release_for_manual_publish(job_id, clip_index):
+        owner = live_monitor.publication_owner(job_id, clip_index)  # None once handed over
     if owner:
         raise HTTPException(
             status_code=409,
-            detail=f"Clip is queued for automatic publishing by monitor {owner}; "
-                   "publish it by hand only once that publish is accepted or has failed")
+            detail=f"Clip is being published by monitor {owner} right now; "
+                   "check Live Monitor in a minute.")
 
     # require_file=False: the base clip may be absent when a composed file
     # exists on disk — publish_clip_flow resolves the actual upload path.
