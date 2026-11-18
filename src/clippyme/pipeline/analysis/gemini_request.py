@@ -13,6 +13,11 @@ import time
 
 from clippyme.pipeline.language import job_language, language_name
 
+# Titles, hooks and captions are written in English unless the job is locked
+# to another spoken language. Auto-detected ("multi") jobs used to follow the
+# transcript, and the Italian example hooks below pulled them into Italian.
+DEFAULT_OUTPUT_LANGUAGE = "en"
+
 # Paid-tier Standard pricing, USD per 1M tokens, text input. Thinking tokens
 # are billed at the output rate. Source: ai.google.dev/gemini-api/docs/pricing
 # (checked 2026-09-28) — update when Google changes rates. "long": rates once
@@ -402,7 +407,8 @@ def build_viral_prompt(transcript_result, video_duration, instructions=None, cre
         words_toon=encode_words_toon(words),
         user_instructions_block=user_instructions_block,
         creator_block=creator_block,
-        **_language_fields(output_language if output_language is not None else job_language()),
+        **_language_fields(output_language if output_language is not None
+                           else (job_language() or DEFAULT_OUTPUT_LANGUAGE)),
     )
     return prompt, words
 

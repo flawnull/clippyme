@@ -26,11 +26,23 @@ def test_prompt_forces_english_when_job_language_is_set(monkeypatch):
     assert "Same language as" not in prompt
 
 
-def test_prompt_follows_transcript_without_a_job_language(monkeypatch):
-    monkeypatch.delenv("CLIPPYME_LANGUAGE", raising=False)
+def test_auto_detected_jobs_still_get_english_text(monkeypatch):
+    """Reported: a "multi" job got the Italian title "Ha appena trovato
+    Bigfoot o è un glitch assurdo?" from an English stream."""
+    for value in (None, "multi"):
+        if value is None:
+            monkeypatch.delenv("CLIPPYME_LANGUAGE", raising=False)
+        else:
+            monkeypatch.setenv("CLIPPYME_LANGUAGE", value)
+        prompt, _ = build_viral_prompt(TRANSCRIPT, 60)
+        assert "MUST be written in English" in prompt
+        assert "{lang_phrase" not in prompt and "{language_rule" not in prompt
+
+
+def test_a_job_locked_to_italian_writes_italian(monkeypatch):
+    monkeypatch.setenv("CLIPPYME_LANGUAGE", "it")
     prompt, _ = build_viral_prompt(TRANSCRIPT, 60)
-    assert "SAME LANGUAGE as the transcript" in prompt
-    assert "{lang_phrase" not in prompt and "{language_rule" not in prompt
+    assert "MUST be written in Italian" in prompt
 
 
 def _capture(monkeypatch, module, fn_name):

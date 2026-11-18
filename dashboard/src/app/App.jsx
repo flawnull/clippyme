@@ -42,7 +42,7 @@ const DEFAULT_OPTS = {
   hooks: true, hookPos: 'top', hookSize: 'M', hookStyle: { ...HOOK_STYLE_DEFAULT },
   logo: false, logoPos: 'top-right', logoSize: 'M', gradePreset: 'none',
   banner: false, bannerPlatform: 'kick', bannerHandle: '', bannerYPct: 0.85,
-  language: 'multi',
+  language: 'en',
   platforms: { tiktok: true, ig: true, yt: false },
   preset: 'viral',
 };
