@@ -5,6 +5,7 @@ import json
 import os
 
 from clippyme.monitoring.language_fix import (
+    clips_to_fix,
     fix_clip,
     needs_retranscription,
     parse_translation,
@@ -37,11 +38,12 @@ def test_splice_replaces_only_the_clip_range():
     assert transcript["segments"][0]["words"][1]["word"] == "hola"  # input untouched
 
 
-def test_parse_translation_keeps_only_requested_string_keys():
-    fields = {"title": "Hola", "viral_hook_text": "Mira esto"}
-    text = 'Sure:\n```json\n{"title": "Hello", "viral_hook_text": " Watch this ", "x": "y", "title2": 3}\n```'
-    assert parse_translation(text, fields) == {"title": "Hello", "viral_hook_text": "Watch this"}
-    assert parse_translation("no json", fields) == {}
+def test_parse_translation_keeps_only_requested_clips_and_fields():
+    asked = {"0": {"title": "Hola", "viral_hook_text": "Mira esto"}, "1": {"title": "Ciao"}}
+    text = ('Sure:\n```json\n{"0": {"title": "Hello", "viral_hook_text": " Watch this ", '
+            '"x": "y"}, "2": {"title": "?"}}\n```')
+    assert parse_translation(text, asked) == {"0": {"title": "Hello", "viral_hook_text": "Watch this"}}
+    assert parse_translation("no json", asked) == {}
 
 
 def _job(tmp_path, transcript_language="es"):
@@ -66,12 +68,15 @@ def test_fix_clip_redoes_subtitles_and_text_once(tmp_path):
         calls.append((os.path.basename(path), language))
         return {"segments": [{"start": 0, "end": 1, "words": [_w("hello", 0, 0.5), _w("chat", 0.5, 1)]}]}
 
-    def translate(fields, name):
-        assert name == "English"
-        return {"title": "Hello chat", "viral_hook_text": "Watch this"}
+    def translate(clips, name):
+        assert name == "English" and list(clips) == ["0"]
+        return {"0": {"title": "Hello chat", "viral_hook_text": "Watch this"}}
 
+    composed = os.path.join(out, "j1", "Hola chat_1.mp4")
+    open(composed, "wb").close()
     changed = fix_clip("j1", 0, out, "en", transcribe=transcribe, translate=translate)
     assert changed == {"title": "Hello chat", "viral_hook_text": "Watch this"}
+    assert not os.path.exists(composed)  # stale render with Spanish text
     assert calls == [("source_clip_1.mp4", "en")]
     meta = json.loads(meta_path.read_text())
     words = [w["word"] for s in meta["transcript"]["segments"] for w in s["words"]]
@@ -79,7 +84,8 @@ def test_fix_clip_redoes_subtitles_and_text_once(tmp_path):
     assert meta["transcript"]["segments"][0]["words"][0]["start"] == 4.0
     assert meta["shorts"][0]["title"] == "Hello chat"
     assert meta["shorts"][0]["subtitle_language"] == "en"
-    assert fix_clip("j1", 0, out, "en", transcribe=transcribe, translate=translate) is None
+    # Already done: no calls, the current text comes back.
+    assert fix_clip("j1", 0, out, "en", transcribe=None, translate=None) == changed
 
 
 def test_fix_clip_keeps_english_subtitles(tmp_path):
@@ -88,15 +94,83 @@ def test_fix_clip_keeps_english_subtitles(tmp_path):
     def transcribe(*_a):
         raise AssertionError("an English transcript is not redone")
 
-    assert fix_clip("j1", 0, out, "en", transcribe=transcribe, translate=lambda f, n: {}) == {}
+    assert fix_clip("j1", 0, out, "en", transcribe=transcribe,
+                    translate=lambda c, n: {"0": {"title": "Hi chat"}}) == {
+        "title": "Hi chat", "viral_hook_text": "Mira esto"}
     assert json.loads(meta_path.read_text())["shorts"][0]["subtitle_language"] == "en"
 
 
 def test_failed_transcription_is_retried_next_start(tmp_path):
     out, meta_path = _job(tmp_path)
-    fix_clip("j1", 0, out, "en", transcribe=lambda *_a: None, translate=lambda f, n: {"title": "Hi"})
+    assert fix_clip("j1", 0, out, "en", transcribe=lambda *_a: None,
+                    translate=lambda c, n: {"0": {"title": "Hi"}}) is None
     short = json.loads(meta_path.read_text())["shorts"][0]
     assert short["title"] == "Hi" and "subtitle_language" not in short
+
+
+def test_gemini_failure_leaves_the_clip_for_next_start(tmp_path):
+    out, meta_path = _job(tmp_path, transcript_language="en")
+
+    def quota(*_a):
+        raise RuntimeError("429 RESOURCE_EXHAUSTED")
+
+    assert fix_clip("j1", 0, out, "en", transcribe=None, translate=quota) is None
+    assert "subtitle_language" not in json.loads(meta_path.read_text())["shorts"][0]
+
+
+def test_job_locked_to_another_language_on_purpose_is_left_alone():
+    meta = {"transcript": {"forced_language": "it"}, "shorts": [{"title": "Ciao"}]}
+    assert clips_to_fix(meta, "en") == []
+    meta = {"transcript": {"language": "es"}, "shorts": [
+        {"title": "a"}, {"title": "b", "subtitle_language": "en"},
+        {"title": "c", "deleted_after_publish": True}]}
+    assert clips_to_fix(meta, "en") == [0]
+
+
+DONE, RUNNING, QUEUED, A, B, C = (f"{n:08x}-0000-4000-8000-000000000000" for n in range(1, 7))
+
+
+def test_history_sweep_fixes_jobs_but_not_monitor_clips_or_running_jobs(tmp_path):
+    from clippyme.monitoring.live_monitor import LiveMonitorRegistry
+
+    out = tmp_path / "out"
+    for job in (DONE, RUNNING, QUEUED):
+        (out / job).mkdir(parents=True)
+        (out / job / f"{job}_metadata.json").write_text(json.dumps({
+            "transcript": {"language": "es"}, "shorts": [{"title": "Hola"}, {"title": "Ya"}]}))
+    reg = LiveMonitorRegistry(jobs={RUNNING: {"status": "processing"}}, job_queue=None,
+                              output_dir=str(out), state_path=str(tmp_path / "state.json"))
+    reg._snapshots["kick:n3on"] = {"pending_publish": [
+        {"job_id": QUEUED, "clip": {"original_index": 0}}]}
+    calls = []
+
+    def fake_fix(job_id, output_dir, language, indices):
+        calls.append((job_id, indices))
+        return {i: {} for i in indices}
+
+    n = asyncio.run(reg.sweep_history_language(spacing=0, fix=fake_fix))
+    assert sorted(calls) == sorted([(DONE, [0, 1]), (QUEUED, [1])])
+    assert n == 3
+
+
+def test_history_sweep_pauses_when_nothing_works(tmp_path):
+    from clippyme.monitoring.live_monitor import LiveMonitorRegistry
+
+    out = tmp_path / "out"
+    for job in (A, B, C):
+        (out / job).mkdir(parents=True)
+        (out / job / f"{job}_metadata.json").write_text(json.dumps({
+            "transcript": {"language": "es"}, "shorts": [{"title": "Hola"}]}))
+    reg = LiveMonitorRegistry(jobs={}, job_queue=None, output_dir=str(out),
+                              state_path=str(tmp_path / "state.json"))
+    calls = []
+
+    def no_quota(job_id, *_a):
+        calls.append(job_id)
+        return {}
+
+    assert asyncio.run(reg.sweep_history_language(spacing=0, fix=no_quota)) == 0
+    assert len(calls) == 2
 
 
 def test_monitor_redoes_queued_clips_and_rerenders(tmp_path, monkeypatch):

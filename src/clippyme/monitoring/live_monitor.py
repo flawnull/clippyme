@@ -546,6 +546,9 @@ DEFAULT_LANGUAGE = "en"
 DEFAULT_DELETE_AFTER_PUBLISH = False
 DEFAULT_MAX_POSTS_PER_DAY = 6
 DEFAULT_REVIEW_MINUTES = 15
+# Gap between jobs in the one-time History language repair (Gemini free tier
+# allows only a few requests a minute, and new segments need them too).
+HISTORY_FIX_SPACING_SECONDS = 20
 
 
 def _validate_language(value) -> str:
@@ -2884,10 +2887,75 @@ class LiveMonitorRegistry:
             logger.warning("LiveMonitor %s: snapshot on retire failed", mid, exc_info=True)
         self._monitors.pop(mid, None)
 
+    def _held_by_monitor(self, job_id: str, idx: int) -> bool:
+        """Queued or failed in a monitor: that monitor repairs and re-renders
+        the clip itself (``LiveMonitor._fix_queue_language``)."""
+        if self.publication_owner(job_id, idx):
+            return True
+        failed = [e for m in self._monitors.values() for e in m._failed_publish]
+        failed += [e for snap in self._snapshots.values() for e in snap.get("failed_publish") or []]
+        return any(e.get("job_id") == job_id
+                   and (e.get("clip") or {}).get("original_index") == idx for e in failed)
+
+    async def sweep_history_language(self, language: str = DEFAULT_LANGUAGE,
+                                     spacing: float = HISTORY_FIX_SPACING_SECONDS,
+                                     fix=None) -> int:
+        """Once per clip: bring every History clip made before the language
+        was enforced into ``language`` (see ``monitoring/language_fix.py``).
+        One job at a time, ``spacing`` seconds apart to spare the Gemini
+        quota; stops early after two jobs in a row make no progress (Gemini
+        out of quota, no keys) and tries again at the next start. Returns the
+        number of clips repaired."""
+        from clippyme.jobs.job_artifacts import load_job_metadata
+        from clippyme.jobs.job_control import ACTIVE_STATES
+        from clippyme.monitoring.language_fix import clips_to_fix, fix_job, history_jobs
+
+        fix = fix or fix_job
+        repaired, stalled = 0, 0
+        for job_id in await asyncio.to_thread(history_jobs, self._output_dir):
+            job = self._jobs.get(job_id) or {}
+            if job.get("status") in ACTIVE_STATES:
+                continue
+            try:
+                _, meta = await asyncio.to_thread(load_job_metadata, job_id, self._output_dir)
+            except (OSError, ValueError):
+                continue
+            todo = [i for i in clips_to_fix(meta, language)
+                    if not self._held_by_monitor(job_id, i)]
+            if not todo:
+                continue
+            job_dir = os.path.join(self._output_dir, job_id)
+            try:
+                async with contextlib.AsyncExitStack() as stack:
+                    for i in todo:  # ascending order; other holders take one lock
+                        await stack.enter_async_context(clip_lock(job_dir, i))
+                    done = await asyncio.to_thread(fix, job_id, self._output_dir, language, todo)
+            except Exception:
+                logger.exception("language sweep failed for %s", job_id)
+                done = {}
+            repaired += len(done)
+            stalled = 0 if done else stalled + 1
+            if stalled >= 2:
+                logger.warning("language sweep paused: no progress (Gemini quota or keys); "
+                               "it resumes at the next start")
+                break
+            await asyncio.sleep(spacing)
+        if repaired:
+            logger.info("language sweep: %d History clip(s) now in %s", repaired, language)
+        return repaired
+
+    def start_history_language_sweep(self) -> None:
+        self._sweep_task = asyncio.create_task(self.sweep_history_language())
+
     async def shutdown(self) -> None:
         """Graceful process shutdown: stop every monitor task WITHOUT
         disabling ``resume_on_start``, persisting the last coverage point
         before the process exits."""
+        sweep = getattr(self, "_sweep_task", None)
+        if sweep is not None and not sweep.done():
+            sweep.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await sweep
         for mid, mon in list(self._monitors.items()):
             try:
                 await mon.stop()

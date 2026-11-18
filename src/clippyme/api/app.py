@@ -164,6 +164,12 @@ async def lifespan(app: FastAPI):
         await live_monitor.auto_resume()
     except Exception:
         logger.exception("live monitor auto-resume failed")
+    # One-time repair of History clips made before titles and subtitles were
+    # locked to English (background, a job every 20 s; no-op once done).
+    try:
+        live_monitor.start_history_language_sweep()
+    except Exception:
+        logger.exception("history language sweep did not start")
     yield
     # Stop the live monitor first so its in-flight capture/publish tasks unwind
     # cleanly before we tear down the worker loops they depend on. shutdown()
