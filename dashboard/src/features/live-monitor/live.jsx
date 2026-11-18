@@ -273,7 +273,7 @@ function PendingClips({ monitor, onDiscard, discardingId, onPostNow, postingId }
   const more = (monitor.pending_publish || 0) - clips.length;
   return (
     <div style={{ display: 'grid', gap: 8, marginTop: 4 }}>
-      <div className="od">Queued to publish. Discard any clip you don&apos;t want posted; it stays in History.</div>
+      <div className="od">Queued to publish. Discard deletes a clip you don&apos;t want posted, freeing its disk space.</div>
       {clips.map((c) => {
         const busy = c.state === 'in_flight';
         // The composed file is what gets posted (subtitles, hook, banner);
@@ -523,7 +523,7 @@ export function LiveMonitorView({ pushToast }) {
     setDiscardingId(publicationId);
     try {
       await discardPendingClip(monitorId, publicationId);
-      pushToast?.('info', 'Clip discarded. It won\'t be posted.');
+      pushToast?.('info', 'Clip discarded and deleted.');
       refreshMonitors();
     } catch (e) {
       pushToast?.('error', 'Discard failed: ' + String(e.message || e).slice(0, 60));

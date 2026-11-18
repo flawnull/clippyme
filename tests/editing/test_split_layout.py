@@ -13,7 +13,7 @@ FACE = (250, 170, 100, 120)  # in a webcam overlay at the top-left
 def test_bands_fill_the_frame_with_even_heights():
     top, bottom = sl.bands()
     assert top + bottom == sl.OUT_H and top % 2 == 0 and bottom % 2 == 0
-    assert 0.35 < top / sl.OUT_H < 0.40
+    assert 0.30 < top / sl.OUT_H < 0.36
 
 
 def test_stable_face_needs_agreement_and_ignores_moving_game_faces():
@@ -82,7 +82,7 @@ def test_monitor_recipe_for_split_drops_the_banner_and_moves_the_hook():
     split = build_monitor_compose("kick", "n3on", clip, None, layout="split")
     assert split["layout_params"] == {"mode": "split"}
     assert split["banner_params"] == {} and split["hook_params"]["size"] == "L"
-    assert split["hook_params"]["offset_y"] > 15
+    assert split["hook_params"]["offset_y"] == round(sl.TOP_FRACTION * 100 - 20 + 1.5, 1)
     kept = build_monitor_compose("kick", "n3on", clip, {"banner": {"enabled": True}}, layout="split")
     assert kept["banner_params"]["handle"]
     letterbox = build_monitor_compose("kick", "n3on", clip, None, layout="letterbox")
@@ -108,3 +108,14 @@ def test_a_failing_split_render_falls_back_instead_of_raising(tmp_path, monkeypa
     assert sl.render_split(str(tmp_path / "missing.mp4"), str(out),
                            detector=lambda p: ([[FACE]] * 8, W, H)) is None
     assert not out.exists()
+
+
+
+def test_cam_crop_limits_the_upscale_inside_the_overlay():
+    """Reported: the camera band looked low quality, a tight face crop was
+    stretched 3-4x. The crop now keeps the upscale near MAX_UPSCALE."""
+    top, _ = sl.bands()
+    x, y, w, h = sl.cam_box((800, 400, 90, 100), W, H, top)  # typical webcam face size
+    assert sl.OUT_W / w <= sl.MAX_UPSCALE + 0.05
+    ox, oy, ow, oh = sl.overlay_box((800, 400, 90, 100), W, H)
+    assert w <= ow + 2  # still inside the estimated webcam overlay

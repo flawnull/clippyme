@@ -132,3 +132,35 @@ def test_preview_url_never_points_outside_the_output_dir(tmp_path):
     assert _served_url(str(tmp_path / "elsewhere.mp4"), str(out)) == ""
     assert _served_url(None, str(out)) == ""
     assert _served_url(str(out / "a" / "b.mp4"), str(out)) == "/videos/a/b.mp4"
+
+
+def test_discard_deletes_the_clip_files_from_disk(tmp_path):
+    """Reported: discarded clips kept using disk space."""
+    mon = _monitor(tmp_path)
+    job_dir = tmp_path / "out" / "j1"
+    job_dir.mkdir(parents=True)
+    raw, source, cover = job_dir / "clip_1.mp4", job_dir / "source_clip_1.mp4", job_dir / "clip_1_cover.jpg"
+    keep = job_dir / "clip_0.mp4"
+    for f in (raw, source, cover, keep):
+        f.write_bytes(b"video")
+    drop = _entry(mon, "j1", 1, "drop")
+    mon._enqueue_publications([_entry(mon, "j1", 0, "keep"), drop])
+    mon.discard_publication(drop["publication_id"])
+    assert not raw.exists() and not source.exists() and not cover.exists()
+    assert keep.exists()  # other clips of the job are untouched
+
+
+def test_start_sweeps_recordings_left_by_a_restart(tmp_path):
+    mon = _monitor(tmp_path)
+    up = tmp_path / "up"
+    up.mkdir()
+    mon._upload_dir = str(up)
+    owned = up / "live_kick_n3on_200.mp4"
+    orphan, orphan_log = up / "live_kick_n3on_100.mp4", up / "live_kick_n3on_100.mp4.log"
+    other = up / "live_twitch_lacy_100.mp4"
+    for f in (owned, orphan, orphan_log, other):
+        f.write_bytes(b"x")
+    mon._inflight_jobs = {"job-a": str(owned)}  # a segment a job still needs
+    assert mon._sweep_orphan_segments() == 2
+    assert owned.exists() and other.exists()
+    assert not orphan.exists() and not orphan_log.exists()
