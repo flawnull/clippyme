@@ -27,6 +27,17 @@ docker compose up --build -d
 
 Open <http://localhost:5175>.
 
+### Updating
+
+```bash
+./scripts/update.sh
+```
+
+It pulls the latest version and restarts in seconds for code changes, or
+rebuilds (several minutes) only when dependencies or the Docker setup changed.
+Run it right after a segment ends (just after :00 or :30), since a restart drops
+the segment being recorded.
+
 ## 2. Keys to get
 
 Enter them in the dashboard under **Settings**. They are stored in `data/`,
