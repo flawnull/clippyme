@@ -128,3 +128,53 @@ def test_review_minutes_config():
     assert validate_monitor_partial_update({"review_minutes": 0}, cfg)["review_minutes"] == 0
     assert validate_monitor_partial_update({"review_minutes": 20}, cfg)["review_minutes"] == 20
     assert validate_monitor_partial_update({"review_minutes": 99999}, cfg)["review_minutes"] == 1440
+
+
+# -- Post now -------------------------------------------------------------------
+
+def test_post_now_publishes_only_that_clip_while_auto_publish_is_off(tmp_path, monkeypatch):
+    mon, clock = _monitor(tmp_path, monkeypatch, review=20, publishing=False)
+    keep, other = _entry("j1", 0), _entry("j1", 1)
+    _enqueue(mon, [keep, other])
+    published = []
+
+    async def fake_publish_one(entry):
+        assert mon._publishable(entry)
+        published.append(entry["clip"]["title"])
+        mon._dequeue(entry)
+
+    monkeypatch.setattr(mon, "_publish_one", fake_publish_one)
+
+    async def run():
+        mon._stop = asyncio.Event()
+        result = mon.approve_publication(keep["publication_id"])
+        assert result["approved"] == keep["publication_id"]
+        await asyncio.gather(*list(mon._publish_tasks))
+
+    asyncio.run(run())
+    assert published == ["clip 0"]            # no review wait, auto-publish still off
+    assert [e["clip"]["title"] for e in mon._pending_publish] == ["clip 1"]
+    assert mon.status()["pending_clips"][0]["approved"] is False
+
+
+def test_post_now_is_refused_while_the_clip_is_uploading(tmp_path, monkeypatch):
+    import pytest
+    from clippyme.core.errors import ConflictError, NotFoundError
+    mon, _ = _monitor(tmp_path, monkeypatch, publishing=False)
+    entry = _entry("j1", 0)
+    _enqueue(mon, [entry])
+    entry["state"] = "in_flight"
+    with pytest.raises(ConflictError):
+        mon.approve_publication(entry["publication_id"])
+    with pytest.raises(NotFoundError):
+        mon.approve_publication("00000000-0000-0000-0000-000000000000")
+
+
+def test_pausing_does_not_drop_a_post_now_clip(tmp_path, monkeypatch):
+    mon, _ = _monitor(tmp_path, monkeypatch, publishing=False)
+    entry = _entry("j1", 0)
+    _enqueue(mon, [entry])
+    assert mon._next_due_publication() is None   # paused, not approved: held
+    entry["approved"] = True
+    entry.pop("review_until", None)
+    assert mon._next_due_publication() is entry

@@ -420,6 +420,19 @@ export async function setMonitorPublishing(monitorId, enabled) {
   return res.json();
 }
 
+// Post one queued clip now, even with auto-publish off. 409 while uploading.
+export async function publishPendingClip(monitorId, publicationId) {
+  const res = await apiFetch(getApiUrl(
+    `/api/live-monitor/${encodeURIComponent(monitorId)}/pending/${encodeURIComponent(publicationId)}/publish`), {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 // Drop one queued clip from a monitor's auto-publish queue. The clip stays in
 // its job (History). 409 while it is being published.
 export async function discardPendingClip(monitorId, publicationId) {

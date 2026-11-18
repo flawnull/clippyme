@@ -5,7 +5,7 @@
 import { useState, useEffect } from 'react';
 import { Hero } from '../../components/headers';
 import { Icon, Panel, Btn, Badge, Switch, Segmented, PlatPill, PLATFORMS } from '../../components/primitives';
-import { getZernio, startLiveMonitor, stopLiveMonitor, updateMonitorConfig, setMonitorPublishing, discardPendingClip } from '../../api/client';
+import { getZernio, startLiveMonitor, stopLiveMonitor, updateMonitorConfig, setMonitorPublishing, discardPendingClip, publishPendingClip } from '../../api/client';
 import { getApiUrl } from '../../api/config';
 import { PLAT } from '../publishing/publish';
 import { validateSlug, buildPlatformTargets, classifyStartError, clampMonitorTimings, clampPostsPerDay, clampReviewMinutes, reviewLabel, clipSelectionPayload, zoomToPercent, LETTERBOX_ZOOM_PERCENTS } from './liveMonitorForm';
@@ -250,7 +250,7 @@ function MonitorSettings({ monitor, onApply, applying }) {
 
 // Clips waiting in the monitor's auto-publish queue. Reviewing them is the
 // point of pausing publishing: discard the ones that should never go out.
-function PendingClips({ monitor, onDiscard, discardingId }) {
+function PendingClips({ monitor, onDiscard, discardingId, onPostNow, postingId }) {
   const clips = monitor.pending_clips || [];
   if (clips.length === 0) return null;
   const more = (monitor.pending_publish || 0) - clips.length;
@@ -274,7 +274,7 @@ function PendingClips({ monitor, onDiscard, discardingId }) {
               <div className="od">
                 {typeof c.viral_score === 'number' ? `Score ${c.viral_score}` : 'No score'}
                 {busy ? ' · publishing now' : c.state === 'retry_wait' ? ' · retrying'
-                  : reviewLabel(c.review_until, monitor.publishing_enabled)}
+                  : c.approved ? ' · posting soon' : reviewLabel(c.review_until, monitor.publishing_enabled)}
               </div>
             </div>
             {src && (
@@ -283,6 +283,12 @@ function PendingClips({ monitor, onDiscard, discardingId }) {
                 <Icon n="download" /><span>Download</span>
               </a>
             )}
+            <Btn variant="primary" size="sm" icon="send"
+              disabled={busy || c.approved || postingId === c.publication_id}
+              aria-label={`Post ${c.title || 'clip'} now`}
+              onClick={() => onPostNow(monitor.id, c.publication_id)}>
+              {c.approved || postingId === c.publication_id ? 'Posting…' : 'Post now'}
+            </Btn>
             <Btn variant="secondary" size="sm" icon="trash-2"
               disabled={busy || discardingId === c.publication_id}
               aria-label={`Discard ${c.title || 'clip'}`}
@@ -297,7 +303,7 @@ function PendingClips({ monitor, onDiscard, discardingId }) {
   );
 }
 
-function MonitorCard({ monitor, onStop, stopping, onApplySettings, applyingSettings, onTogglePublishing, togglingPublishing, onDiscard, discardingId }) {
+function MonitorCard({ monitor, onStop, stopping, onApplySettings, applyingSettings, onTogglePublishing, togglingPublishing, onDiscard, discardingId, onPostNow, postingId }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   return (
     <div className="opt" style={{ borderBottom: 0, flexDirection: 'column', alignItems: 'stretch' }}>
@@ -343,7 +349,8 @@ function MonitorCard({ monitor, onStop, stopping, onApplySettings, applyingSetti
           onChange={(on) => onTogglePublishing(monitor.id, on)} />
       </div>
 
-      <PendingClips monitor={monitor} onDiscard={onDiscard} discardingId={discardingId} />
+      <PendingClips monitor={monitor} onDiscard={onDiscard} discardingId={discardingId}
+        onPostNow={onPostNow} postingId={postingId} />
 
       {settingsOpen && (
         <MonitorSettings monitor={monitor} onApply={onApplySettings} applying={applyingSettings} />
@@ -387,6 +394,7 @@ export function LiveMonitorView({ pushToast }) {
   const [applyingSettingsId, setApplyingSettingsId] = useState(null);
   const [togglingPublishingId, setTogglingPublishingId] = useState(null);
   const [discardingId, setDiscardingId] = useState(null);
+  const [postingId, setPostingId] = useState(null);
 
   const [monitors, refreshMonitors, meta] = useLiveMonitorStatus();
 
@@ -479,6 +487,19 @@ export function LiveMonitorView({ pushToast }) {
     }
   };
 
+  const onPostNow = async (monitorId, publicationId) => {
+    setPostingId(publicationId);
+    try {
+      await publishPendingClip(monitorId, publicationId);
+      pushToast?.('success', 'Posting in about 2 minutes.');
+      refreshMonitors();
+    } catch (e) {
+      pushToast?.('error', 'Post failed: ' + String(e.message || e).slice(0, 60));
+    } finally {
+      setPostingId(null);
+    }
+  };
+
   const onDiscard = async (monitorId, publicationId) => {
     setDiscardingId(publicationId);
     try {
@@ -507,7 +528,8 @@ export function LiveMonitorView({ pushToast }) {
           <MonitorCard key={m.id} monitor={m} onStop={onStop} stopping={stoppingId === m.id}
             onApplySettings={onApplySettings} applyingSettings={applyingSettingsId === m.id}
             onTogglePublishing={onTogglePublishing} togglingPublishing={togglingPublishingId === m.id}
-            onDiscard={onDiscard} discardingId={discardingId} />
+            onDiscard={onDiscard} discardingId={discardingId}
+            onPostNow={onPostNow} postingId={postingId} />
         ))}
       </Panel>
 

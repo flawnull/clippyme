@@ -250,6 +250,7 @@ def pending_clip_summary(entry: dict, output_dir: str = "") -> dict:
         "preview_url": _served_url(entry.get("composed_path"), output_dir) if output_dir else "",
         "state": entry.get("state") or "queued",
         "review_until": entry.get("review_until"),
+        "approved": bool(entry.get("approved")),
     }
 
 
@@ -2052,18 +2053,22 @@ class LiveMonitor:
             except RuntimeError:
                 logger.warning("LiveMonitor %s: no running loop for publish drain", self.id)
 
+    def _publishable(self, entry: dict) -> bool:
+        """Auto-publish is on, or the owner pressed Post now on this clip."""
+        return self.publishing_enabled or bool(entry.get("approved"))
+
     def _next_due_publication(self) -> dict | None:
         now = time.time()
         for entry in self._pending_publish:
-            if self._due_at(entry) <= now:
+            if self._publishable(entry) and self._due_at(entry) <= now:
                 return entry
         return None
 
     def _seconds_until_next_retry(self) -> float | None:
-        if not self._pending_publish:
+        due = [self._due_at(e) for e in self._pending_publish if self._publishable(e)]
+        if not due:
             return None
-        soonest = min(self._due_at(e) for e in self._pending_publish)
-        return max(0.0, soonest - time.time())
+        return max(0.0, min(due) - time.time())
 
     async def _publish_one(self, entry: dict) -> None:
         """Try to get one clip accepted by Zernio — uploads the composed file
@@ -2078,7 +2083,7 @@ class LiveMonitor:
             self._persist()
             return
         self._ensure_queued(entry)
-        if not self.publishing_enabled:
+        if not self._publishable(entry):
             self._persist()
             return
         # Durable BEFORE the provider call: a crash mid-publish leaves the entry
@@ -2139,6 +2144,8 @@ class LiveMonitor:
 
         async with self._publish_lock:
             self._sync_scheduler()
+            if entry.get("approved"):
+                self._scheduler.asap = True  # Post now: never wait for prime time
             attempt = 0
             day_rolls = 0
             # None → publish_clip picks today, or tomorrow from 22:00. "asap"
@@ -2319,6 +2326,29 @@ class LiveMonitor:
         return {"publishing_enabled": self.publishing_enabled,
                 "pending_publish": len(self._pending_publish)}
 
+    def approve_publication(self, publication_id: str) -> dict:
+        """Post one queued clip now, even with auto-publish off: skip its
+        review window and any retry wait. Spacing and the daily cap still
+        apply, and it is scheduled as soon as possible."""
+        entry = next((e for e in self._pending_publish
+                      if e.get("publication_id") == publication_id), None)
+        if entry is None:
+            raise NotFoundError(f"no queued clip {publication_id}")
+        if entry.get("state") == "in_flight":
+            raise ConflictError("clip is being published right now")
+        entry["approved"] = True
+        entry.pop("review_until", None)
+        entry.pop("next_retry_at", None)
+        self._persist()
+        if not self._draining:
+            try:
+                self._track_task(asyncio.create_task(self._drain_pending()))
+            except RuntimeError:
+                logger.warning("LiveMonitor %s: no running loop to post %s", self.id,
+                               publication_id)
+        logger.info("LiveMonitor %s: Post now for queued clip %s", self.id, publication_id)
+        return {"approved": publication_id, "pending_publish": len(self._pending_publish)}
+
     def discard_publication(self, publication_id: str) -> dict:
         """Drop one queued clip so it is never auto-published.
 
@@ -2358,7 +2388,9 @@ class LiveMonitor:
         self._draining = True
         try:
             first = True
-            while self.publishing_enabled and not self._stop.is_set():
+            # Runs while anything is publishable: everything with auto-publish
+            # on, only Post-now clips while it is off.
+            while not self._stop.is_set():
                 entry = self._next_due_publication()
                 if entry is None:
                     wait = self._seconds_until_next_retry()
@@ -2368,8 +2400,10 @@ class LiveMonitor:
                     continue
                 if not first:
                     await asyncio.sleep(PUBLISH_SPACING_SECONDS)
-                    if self._stop.is_set() or not self.publishing_enabled:
+                    if self._stop.is_set():
                         break
+                    if not self._publishable(entry):
+                        continue  # auto-publish paused during the spacing sleep
                     if self._queue_index(entry) is None:
                         continue  # discarded during the spacing sleep
                 first = False
@@ -2649,6 +2683,13 @@ class LiveMonitorRegistry:
         result = mon.set_publishing(enabled)
         self.persist()
         return result
+
+    def approve_publication(self, monitor_id: str, publication_id: str) -> dict:
+        """Post one queued clip now (Post now in the dashboard)."""
+        mon = self._monitors.get(monitor_id)
+        if mon is None:
+            raise NotFoundError(f"no such monitor: {monitor_id}")
+        return mon.approve_publication(publication_id)
 
     def discard_publication(self, monitor_id: str, publication_id: str) -> dict:
         """Remove one queued clip from a monitor's publish queue."""
