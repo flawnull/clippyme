@@ -496,7 +496,12 @@ async def _compose_layers_impl(
             if os.path.exists(source):
                 split_path = os.path.join(job_dir, f"composed_split_{clip_index}.mp4")
                 intermediate_files.append(split_path)
-                done = await asyncio.to_thread(render_split, source, split_path)
+                try:
+                    done = await asyncio.to_thread(render_split, source, split_path)
+                except Exception:  # a layout problem must never cost the clip
+                    logger.warning("compose_layers: split layout failed, keeping letterbox",
+                                   exc_info=True)
+                    done = None
                 if done:
                     current_input = split_path
                     clip_info = {**(clip_info or {}), "reframe_mode": "split"}

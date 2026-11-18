@@ -95,3 +95,16 @@ def test_layout_config_defaults_to_split():
                                    "platforms": [{"platform": "tiktok", "accountId": "a"}]})
     assert cfg["layout"] == "split"
     assert validate_monitor_partial_update({"layout": "letterbox"}, cfg)["layout"] == "letterbox"
+
+
+def test_a_failing_split_render_falls_back_instead_of_raising(tmp_path, monkeypatch):
+    """A layout problem must never cost the clip: compose then keeps the
+    letterbox base."""
+    def boom(*a, **kw):
+        raise subprocess.CalledProcessError(1, "ffmpeg", stderr=b"Invalid crop size")
+
+    monkeypatch.setattr(sl.subprocess, "run", boom)
+    out = tmp_path / "split.mp4"
+    assert sl.render_split(str(tmp_path / "missing.mp4"), str(out),
+                           detector=lambda p: ([[FACE]] * 8, W, H)) is None
+    assert not out.exists()

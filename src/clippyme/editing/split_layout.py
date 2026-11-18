@@ -179,7 +179,26 @@ def render_split(source_path: str, out_path: str, *, detector=None) -> str | Non
     cmd = ["ffmpeg", "-y", "-v", "error", "-i", source_path,
            "-filter_complex", build_filter(cam, game, top_h, bottom_h),
            "-map", "[v]", "-map", "0:a?", "-c:a", "copy", *x264_video_args(), out_path]
-    subprocess.run(cmd, check=True, timeout=ffmpeg_timeout(), capture_output=True)
+    try:
+        subprocess.run(cmd, check=True, timeout=ffmpeg_timeout(), capture_output=True)
+    except subprocess.CalledProcessError as exc:
+        tail = (exc.stderr or b"").decode("utf-8", "replace").strip().splitlines()[-3:]
+        logger.warning("split layout: ffmpeg failed for %s, keeping letterbox: %s",
+                       os.path.basename(source_path), " | ".join(tail)[:300])
+        _remove(out_path)
+        return None
+    except Exception:
+        logger.warning("split layout: render failed for %s, keeping letterbox",
+                       os.path.basename(source_path), exc_info=True)
+        _remove(out_path)
+        return None
     logger.info("split layout: camera %s, gameplay %s -> %s", cam, game,
                 os.path.basename(out_path))
     return out_path
+
+
+def _remove(path: str) -> None:
+    try:
+        os.remove(path)
+    except OSError:
+        pass
