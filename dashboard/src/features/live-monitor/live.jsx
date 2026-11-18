@@ -109,7 +109,8 @@ function MonitorSettings({ monitor, onApply, applying }) {
   const [sub, setSub] = useState(() => fromComposeSubtitleParams(cfg.compose?.subtitle_params, SUB_DEFAULTS));
   // Default-on (matches the backend default): only an explicit `false` in the
   // persisted config starts the checkbox unchecked.
-  const [deleteAfterPublish, setDeleteAfterPublish] = useState(cfg.delete_after_publish !== false);
+  // Default off (matches the backend): only an explicit true starts it on.
+  const [deleteAfterPublish, setDeleteAfterPublish] = useState(cfg.delete_after_publish === true);
   const [deleteAfterPublishTouched, setDeleteAfterPublishTouched] = useState(false);
   const [clipSelection, setClipSelection] = useState(cfg.clip_selection === 'auto' ? 'auto' : 'fixed');
   const [clipSelectionTouched, setClipSelectionTouched] = useState(false);

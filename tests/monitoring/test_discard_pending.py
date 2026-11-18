@@ -164,3 +164,22 @@ def test_start_sweeps_recordings_left_by_a_restart(tmp_path):
     assert mon._sweep_orphan_segments() == 2
     assert owned.exists() and other.exists()
     assert not orphan.exists() and not orphan_log.exists()
+
+
+def test_manual_publish_takes_a_queued_clip_over(tmp_path):
+    """Reported: publishing a queued clip by hand failed with "queued for
+    automatic publishing by monitor"; it now leaves the monitor's queue."""
+    from clippyme.monitoring.live_monitor import LiveMonitorRegistry
+    reg = LiveMonitorRegistry(jobs={}, job_queue=None, output_dir=str(tmp_path),
+                              state_path=str(tmp_path / "state.json"))
+    mon = _monitor(tmp_path)
+    reg._monitors[mon.id] = mon
+    queued, busy = _entry(mon, "j1", 0, "queued"), _entry(mon, "j1", 1, "busy")
+    mon._enqueue_publications([queued, busy])
+    busy["state"] = "in_flight"
+    assert reg.publication_owner("j1", 0) == mon.id
+    assert reg.release_for_manual_publish("j1", 0) is True
+    assert reg.publication_owner("j1", 0) is None
+    assert reg.release_for_manual_publish("j1", 1) is False  # uploading: still owned
+    queued["state"], queued["attempts"] = "queued", 0
+    assert reg.publication_owner("j1", 1) == mon.id

@@ -29,7 +29,7 @@ def test_settings_update_on_a_monitor_saved_before_new_fields_existed():
     updated = validate_monitor_partial_update({"review_minutes": 15}, _legacy_cfg())
     assert updated["review_minutes"] == 15
     assert updated["chat_signal"] is True
-    assert updated["delete_after_publish"] is True
+    assert updated["delete_after_publish"] is False
     assert updated["smart_cut"] is False
     assert updated["post_timing"] == "asap"
     assert updated["max_posts_per_day"] == 6

@@ -12,6 +12,7 @@ def instant_publish_defaults(monkeypatch):
     monkeypatch.setattr(lm, "DEFAULT_REVIEW_MINUTES", 0)
     monkeypatch.setattr(lm, "DEFAULT_MAX_POSTS_PER_DAY", 0)
     monkeypatch.setattr(lm, "DEFAULT_POST_TIMING", "prime_time")
+    monkeypatch.setattr(lm, "DEFAULT_DELETE_AFTER_PUBLISH", True)
 
 
 @pytest.fixture(autouse=True)
