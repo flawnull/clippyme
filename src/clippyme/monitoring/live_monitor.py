@@ -143,6 +143,49 @@ def publish_retry_delay(attempts: int) -> float:
                PUBLISH_RETRY_BASE_SECONDS * 2 ** max(0, min(int(attempts) - 1, 16)))
 
 
+def publish_error_text(exc: BaseException) -> str:
+    """Readable failure reason: the exception plus Zernio's own message when
+    its body carries one (a bare "HTTP 400" tells the owner nothing)."""
+    text = str(exc)
+    body = getattr(exc, "body", None)
+    if not body:
+        return text[:300]
+    detail = ""
+    try:
+        data = json.loads(body)
+        if isinstance(data, dict):
+            detail = (data.get("message") or data.get("error") or data.get("detail") or "")
+            if isinstance(detail, (dict, list)):
+                detail = json.dumps(detail)
+    except (TypeError, ValueError):
+        detail = str(body)
+    detail = str(detail).strip()
+    return (f"{text}: {detail}" if detail else text)[:300]
+
+
+# Zernio settings key for each publish platform (accounts are saved per key).
+_ACCOUNT_KEYS = {"tiktok": "tiktok", "instagram": "instagram", "youtube": "youtube"}
+
+
+def current_platform_targets(targets: list, accounts: dict) -> list:
+    """The monitor's targets with today's account ids from Zernio settings.
+
+    A monitor saves account ids when it starts; swapping or reconnecting an
+    account in Settings left it posting to a dead id (Zernio: HTTP 400).
+    Targets whose platform has no account saved any more are dropped. With
+    no accounts saved at all (nothing to compare against) the targets stay."""
+    if not any((accounts or {}).values()):
+        return list(targets or [])
+    out = []
+    for t in targets or []:
+        key = _ACCOUNT_KEYS.get(str(t.get("platform")))
+        account = (accounts or {}).get(key) if key else None
+        if key and not account:
+            continue  # disconnected in Settings
+        out.append({**t, "accountId": account or t.get("accountId")})
+    return out
+
+
 def classify_publish_error(exc: BaseException) -> str:
     """``retry`` | ``permanent`` | ``duplicate`` for a failed publish.
 
@@ -992,6 +1035,9 @@ class LiveMonitor:
             "pending_clips": [pending_clip_summary(e, self._output_dir)
                               for e in self._pending_publish[:MAX_PENDING_LISTED]],
             "failed_publish": len(self._failed_publish),
+            "failed_clips": [{**pending_clip_summary(e, self._output_dir),
+                              "error": e.get("last_error") or ""}
+                             for e in self._failed_publish[-MAX_PENDING_LISTED:]],
             "gemini_exhausted_at": self._gemini_exhausted_at,
             # Same allow-list snapshot() persists — no secrets by construction
             # (validate_monitor_config never puts any in cfg). Lets the
@@ -2203,6 +2249,15 @@ class LiveMonitor:
         lang = self.cfg.get("language") or DEFAULT_LANGUAGE
         return None if lang in ("multi", "auto") else lang
 
+    def _publish_targets(self) -> list:
+        from clippyme.storage.config_store import load_zernio_config
+        targets = current_platform_targets(
+            self.cfg["platforms"], load_zernio_config().get("accounts") or {})
+        if not targets:
+            raise ValueError("no connected account for this monitor's platforms "
+                             "(check Zernio in Settings)")
+        return targets
+
     def _local_today(self) -> date:
         from zoneinfo import ZoneInfo
         try:
@@ -2255,7 +2310,7 @@ class LiveMonitor:
                         clip_path=upload_path,
                         title=title[:100],
                         caption=caption,
-                        platform_targets=self.cfg["platforms"],
+                        platform_targets=self._publish_targets(),
                         schedule_mode="auto",
                         timezone=self.cfg["timezone"],
                         scheduler=self._scheduler,
@@ -2305,8 +2360,9 @@ class LiveMonitor:
         if _definitely_not_created(exc):
             entry["request_id"] = str(uuid.uuid4())
         entry["attempts"] = int(entry.get("attempts") or 0) + 1
-        entry["last_error"] = str(exc)[:500]
-        self.last_error = f"publish failed: {exc}"
+        reason = publish_error_text(exc)
+        entry["last_error"] = reason
+        self.last_error = f"publish failed: {reason}"
         if kind == "retry" and entry["attempts"] < PUBLISH_MAX_ATTEMPTS:
             delay = publish_retry_delay(entry["attempts"])
             if _is_idempotency_conflict(exc):
@@ -2331,7 +2387,8 @@ class LiveMonitor:
                          entry["attempts"], exc, body)
             clip_title = (entry.get("clip") or {}).get("title") or "A clip"
             self._notify(f"Clip failed to post · {self.cfg.get('channel') or self.id}",
-                         f"{clip_title}\n{str(exc)[:200]}", tags=("warning",), priority=4)
+                         f"{clip_title}\n{reason[:200]}\nRetry it under the monitor once fixed.",
+                         tags=("warning",), priority=4)
         self._persist()
 
     async def _on_publish_accepted(self, entry: dict, clip_path: str, result: dict | None) -> None:
@@ -2439,6 +2496,43 @@ class LiveMonitor:
                                publication_id)
         logger.info("LiveMonitor %s: Post now for queued clip %s", self.id, publication_id)
         return {"approved": publication_id, "pending_publish": len(self._pending_publish)}
+
+    def _failed_entry(self, publication_id: str) -> dict:
+        entry = next((e for e in self._failed_publish
+                      if e.get("publication_id") == publication_id), None)
+        if entry is None:
+            raise NotFoundError(f"no failed clip {publication_id}")
+        return entry
+
+    def retry_failed(self, publication_id: str) -> dict:
+        """Put a clip that failed to post back in the queue, posting soon."""
+        entry = self._failed_entry(publication_id)
+        self._failed_publish.remove(entry)
+        for key in ("failed_at", "next_retry_at", "review_until", "last_error"):
+            entry.pop(key, None)
+        entry.update(state="queued", attempts=0, approved=True,
+                     request_id=str(uuid.uuid4()))
+        self._ensure_queued(entry)
+        self._persist()
+        if not self._draining:
+            try:
+                self._track_task(asyncio.get_running_loop().create_task(self._drain_pending()))
+            except RuntimeError:
+                pass
+        logger.info("LiveMonitor %s: retrying failed clip %s", self.id, publication_id)
+        return {"retried": publication_id, "pending_publish": len(self._pending_publish)}
+
+    def discard_failed(self, publication_id: str) -> dict:
+        """Drop a clip that failed to post and delete its files."""
+        entry = self._failed_entry(publication_id)
+        self._failed_publish.remove(entry)
+        self._persist()
+        composed = entry.get("composed_path") or ""
+        if composed and os.path.dirname(os.path.abspath(composed)) == os.path.abspath(self._clip_dir):
+            _safe_remove(composed)
+        self._delete_clip_artifacts(entry["job_id"], entry.get("clip") or {},
+                                    self._clip_path(entry), composed)
+        return {"discarded": publication_id, "failed_publish": len(self._failed_publish)}
 
     def discard_publication(self, publication_id: str) -> dict:
         """Drop one queued clip so it is never auto-published.
@@ -2815,6 +2909,18 @@ class LiveMonitorRegistry:
         result = mon.set_publishing(enabled)
         self.persist()
         return result
+
+    def retry_failed(self, monitor_id: str, publication_id: str) -> dict:
+        mon = self._monitors.get(monitor_id)
+        if mon is None:
+            raise NotFoundError(f"no such monitor: {monitor_id}")
+        return mon.retry_failed(publication_id)
+
+    def discard_failed(self, monitor_id: str, publication_id: str) -> dict:
+        mon = self._monitors.get(monitor_id)
+        if mon is None:
+            raise NotFoundError(f"no such monitor: {monitor_id}")
+        return mon.discard_failed(publication_id)
 
     def approve_publication(self, monitor_id: str, publication_id: str) -> dict:
         """Post one queued clip now (Post now in the dashboard)."""

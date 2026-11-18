@@ -18,6 +18,7 @@ vi.mock('../../api/client', () => ({
   setMonitorPublishing: vi.fn(async () => ({ publishing_enabled: true })),
   discardPendingClip: vi.fn(async () => ({ discarded: 'p-1', pending_publish: 1 })),
   publishPendingClip: vi.fn(async () => ({ approved: 'p-1', pending_publish: 1 })),
+  failedClipAction: vi.fn(async () => ({})),
   listFonts: vi.fn(async () => ({ fonts: [] })),
 }));
 
@@ -534,4 +535,20 @@ test('layout defaults to cam + gameplay and can be changed per monitor', async (
   fireEvent.click(screen.getByRole('button', { name: /Start monitor/ }));
   await waitFor(() => expect(startLiveMonitor).toHaveBeenCalled());
   expect(startLiveMonitor.mock.calls[0][0].layout).toBe('split');
+});
+
+test('failed clips show the reason and can be retried or discarded', async () => {
+  const client = await import('../../api/client');
+  mockStatus.mockResolvedValue({
+    monitors: [{ id: 'twitch:lacy', platform: 'twitch', mode: 'live', running: true, state: 'capturing',
+      channel: 'lacy', publishing_enabled: true, pending_publish: 0, pending_clips: [],
+      failed_clips: [{ publication_id: 'f-1', title: 'Prison', state: 'failed',
+        error: 'Zernio POST /posts → HTTP 400: Invalid accountId format', preview_url: '/videos/m/p.mp4' }] }],
+  });
+  render(<LiveMonitorView />);
+  expect(await screen.findByText(/Invalid accountId format/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Retry Prison' }));
+  await waitFor(() => expect(client.failedClipAction).toHaveBeenCalledWith('twitch:lacy', 'f-1', 'retry'));
+  fireEvent.click(screen.getByRole('button', { name: 'Discard failed Prison' }));
+  await waitFor(() => expect(client.failedClipAction).toHaveBeenCalledWith('twitch:lacy', 'f-1', 'discard'));
 });

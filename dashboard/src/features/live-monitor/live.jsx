@@ -5,7 +5,7 @@
 import { useState, useEffect } from 'react';
 import { Hero } from '../../components/headers';
 import { Icon, Panel, Btn, Badge, Switch, Segmented, PlatPill, PLATFORMS } from '../../components/primitives';
-import { getZernio, startLiveMonitor, stopLiveMonitor, updateMonitorConfig, setMonitorPublishing, discardPendingClip, publishPendingClip } from '../../api/client';
+import { getZernio, startLiveMonitor, stopLiveMonitor, updateMonitorConfig, setMonitorPublishing, discardPendingClip, publishPendingClip, failedClipAction } from '../../api/client';
 import { getApiUrl } from '../../api/config';
 import { PLAT } from '../publishing/publish';
 import { validateSlug, buildPlatformTargets, classifyStartError, clampMonitorTimings, clampPostsPerDay, clampReviewMinutes, reviewLabel, clipSelectionPayload, zoomToPercent, LETTERBOX_ZOOM_PERCENTS } from './liveMonitorForm';
@@ -320,7 +320,42 @@ function PendingClips({ monitor, onDiscard, discardingId, onPostNow, postingId }
   );
 }
 
-function MonitorCard({ monitor, onStop, stopping, onApplySettings, applyingSettings, onTogglePublishing, togglingPublishing, onDiscard, discardingId, onPostNow, postingId }) {
+// Clips Zernio refused. They keep their files until discarded, so a fixed
+// account (or a transient problem) only needs a Retry.
+function FailedClips({ monitor, onFailedAction, busyId }) {
+  const clips = monitor.failed_clips || [];
+  if (clips.length === 0) return null;
+  return (
+    <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
+      <div className="od" style={{ color: 'var(--danger)' }}>Failed to post. Fix the reason, then Retry.</div>
+      {clips.map((c) => {
+        const src = c.preview_url || c.video_url;
+        const busy = busyId === c.publication_id;
+        return (
+          <div key={c.publication_id} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            {src && (
+              <video src={getApiUrl(src)} controls muted playsInline preload="metadata"
+                aria-label={`Preview: ${c.title || 'clip'}`}
+                style={{ width: 72, height: 128, objectFit: 'cover', borderRadius: 8, background: '#000', flexShrink: 0 }} />
+            )}
+            <div className="otxt" style={{ minWidth: 0 }}>
+              <div className="ot">{c.title || 'Untitled clip'}</div>
+              <div className="od" style={{ color: 'var(--danger)' }}>{c.error || 'Unknown error'}</div>
+            </div>
+            <Btn variant="primary" size="sm" icon="refresh-cw" disabled={busy}
+              aria-label={`Retry ${c.title || 'clip'}`}
+              onClick={() => onFailedAction(monitor.id, c.publication_id, 'retry')}>Retry</Btn>
+            <Btn variant="secondary" size="sm" icon="trash-2" disabled={busy}
+              aria-label={`Discard failed ${c.title || 'clip'}`}
+              onClick={() => onFailedAction(monitor.id, c.publication_id, 'discard')}>Discard</Btn>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function MonitorCard({ monitor, onStop, stopping, onApplySettings, applyingSettings, onTogglePublishing, togglingPublishing, onDiscard, discardingId, onPostNow, postingId, onFailedAction, failedBusyId }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   return (
     <div className="opt" style={{ borderBottom: 0, flexDirection: 'column', alignItems: 'stretch' }}>
@@ -368,6 +403,7 @@ function MonitorCard({ monitor, onStop, stopping, onApplySettings, applyingSetti
 
       <PendingClips monitor={monitor} onDiscard={onDiscard} discardingId={discardingId}
         onPostNow={onPostNow} postingId={postingId} />
+      <FailedClips monitor={monitor} onFailedAction={onFailedAction} busyId={failedBusyId} />
 
       {settingsOpen && (
         <MonitorSettings monitor={monitor} onApply={onApplySettings} applying={applyingSettings} />
@@ -413,6 +449,7 @@ export function LiveMonitorView({ pushToast }) {
   const [togglingPublishingId, setTogglingPublishingId] = useState(null);
   const [discardingId, setDiscardingId] = useState(null);
   const [postingId, setPostingId] = useState(null);
+  const [failedBusyId, setFailedBusyId] = useState(null);
 
   const [monitors, refreshMonitors, meta] = useLiveMonitorStatus();
 
@@ -506,6 +543,19 @@ export function LiveMonitorView({ pushToast }) {
     }
   };
 
+  const onFailedAction = async (monitorId, publicationId, action) => {
+    setFailedBusyId(publicationId);
+    try {
+      await failedClipAction(monitorId, publicationId, action);
+      pushToast?.('success', action === 'retry' ? 'Retrying in about 2 minutes.' : 'Clip deleted.');
+      refreshMonitors();
+    } catch (e) {
+      pushToast?.('error', 'Failed: ' + String(e.message || e).slice(0, 60));
+    } finally {
+      setFailedBusyId(null);
+    }
+  };
+
   const onPostNow = async (monitorId, publicationId) => {
     setPostingId(publicationId);
     try {
@@ -548,7 +598,8 @@ export function LiveMonitorView({ pushToast }) {
             onApplySettings={onApplySettings} applyingSettings={applyingSettingsId === m.id}
             onTogglePublishing={onTogglePublishing} togglingPublishing={togglingPublishingId === m.id}
             onDiscard={onDiscard} discardingId={discardingId}
-            onPostNow={onPostNow} postingId={postingId} />
+            onPostNow={onPostNow} postingId={postingId}
+            onFailedAction={onFailedAction} failedBusyId={failedBusyId} />
         ))}
       </Panel>
 

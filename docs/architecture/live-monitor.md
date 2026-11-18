@@ -130,6 +130,13 @@ flowchart LR
   slice, cover and composed file) to free the disk. A clip
   already `in_flight` answers 409. The drain re-checks the queue after its
   spacing sleep, so a clip discarded during that sleep is never published.
+- **Failed clips** stay in `failed_publish` with their files and are listed in
+  the status (`failed_clips`, with Zernio's own message from the error body).
+  `POST /api/live-monitor/{id}/failed/{publication_id}/retry` re-queues one as
+  Post now with a fresh idempotency key; `.../discard` drops it and deletes its
+  files. Publishes use the account ids currently saved in Zernio settings for
+  each target platform, so swapping or reconnecting an account needs no monitor
+  restart; a platform with no account saved is skipped.
 - **Post now** (`POST /api/live-monitor/{id}/pending/{publication_id}/publish`)
   marks one queued clip `approved`: it skips its review window and retry
   wait, is published even while auto-publish is off, and is scheduled `asap`
