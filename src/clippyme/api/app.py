@@ -935,6 +935,21 @@ async def live_monitor_set_publishing(monitor_id: str, request: Request):
     return {"monitor": live_monitor.set_publishing(monitor_id, req.enabled)}
 
 
+@app.post("/api/live-monitor/{monitor_id}/failed/{publication_id}/{action}")
+async def live_monitor_failed_clip(monitor_id: str, publication_id: str, action: str,
+                                   request: Request):
+    """Retry or discard a clip that failed to post."""
+    require_trusted_config_request(request)
+    enforce_rate_limit(request, "livemonitor", capacity=10, refill_per_sec=10 / 60)
+    if not _PUBLICATION_ID_RE.fullmatch(publication_id):
+        raise HTTPException(status_code=400, detail="invalid publication id")
+    if action == "retry":
+        return live_monitor.retry_failed(monitor_id, publication_id)
+    if action == "discard":
+        return live_monitor.discard_failed(monitor_id, publication_id)
+    raise HTTPException(status_code=404, detail="unknown action")
+
+
 @app.post("/api/live-monitor/{monitor_id}/pending/{publication_id}/publish")
 async def live_monitor_publish_pending(monitor_id: str, publication_id: str, request: Request):
     """Post one queued clip now, even with auto-publish off. 409 while it is
