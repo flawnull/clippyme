@@ -59,11 +59,13 @@ function PubRow({ clip, idx, st, plats, mode }) {
   );
 }
 
-export function PublishModal({ clips, jobId, clipStates = {}, preselections, onClose, onPublished, pushToast }) {
+export function PublishModal({ clips, jobId, clipStates = {}, preselections, onClose, onPublished, pushToast, initialSchedule = false }) {
   const all = clips.length > 1;
   const [zernio, setZernio] = useState(null);
-  const [plats, setPlats] = useState({ tiktok: true, ig: true, yt: false });
-  const [schedule, setSchedule] = useState(true);
+  // Every connected account by default; platforms without one stay off.
+  const [plats, setPlats] = useState({ tiktok: true, ig: true, yt: true });
+  // Stream clips go stale: publish right away unless prime time is chosen.
+  const [schedule, setSchedule] = useState(initialSchedule);
   const [exactSchedule, setExactSchedule] = useState(false);
   const [publishTime, setPublishTime] = useState('');
   // Snapshot the mode the user actually submitted; React state updates are async.
