@@ -416,6 +416,8 @@ class LiveMonitorStartRequest(BaseModel):
     review_minutes: int = Field(15, ge=0, le=1440)
     # "split": facecam over gameplay; "letterbox": whole frame between bars.
     layout: str = Field("split", pattern=r"^(split|letterbox)$")
+    # Transcription language; "multi" = auto-detect.
+    language: str = Field("en", max_length=8)
 
     @field_validator("timezone")
     @classmethod
