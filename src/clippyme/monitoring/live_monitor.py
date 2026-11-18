@@ -296,7 +296,7 @@ MONITOR_SUBTITLE_SIZE = 135
 
 
 def build_monitor_compose(platform: str, channel: str, clip: dict, override=None,
-                          smart_cut: bool = False) -> dict:
+                          smart_cut: bool = False, layout: str = "letterbox") -> dict:
     """Compose recipe a monitor burns before auto-publishing one clip.
 
     Default layout for a letterboxed (reframe 'disabled') monitor clip:
@@ -312,9 +312,23 @@ def build_monitor_compose(platform: str, channel: str, clip: dict, override=None
     from clippyme.editing.banner import monitor_banner_params
 
     ov = override or {}
-    banner = monitor_banner_params(platform, channel, ov.get("banner"))
+    split = layout == "split"
+    # Split clips (facecam over gameplay) carry no attribution pill unless the
+    # monitor explicitly turned one on; the hook sits on the seam instead.
+    banner_override = ov.get("banner")
+    if split and not (banner_override or {}).get("enabled"):
+        banner = None
+    else:
+        banner = monitor_banner_params(platform, channel, banner_override)
     hook_text = str(clip.get("viral_hook_text") or clip.get("title") or "").strip()
-    hook_params = {"text": hook_text, "position": "top", **(ov.get("hook_params") or {})}
+    hook_base = {"text": hook_text, "position": "top"}
+    if split:
+        from clippyme.editing.split_layout import TOP_FRACTION
+        # "top" places the hook at 20 % of the height; offset_y (percent) moves
+        # it to just under the camera band.
+        hook_base["offset_y"] = round(TOP_FRACTION * 100 - 20 + 1.5, 1)
+        hook_base["size"] = "L"  # the seam title is the clip's headline
+    hook_params = {**hook_base, **(ov.get("hook_params") or {})}
     # TikTok-style captions: centred under the banner, two words at a time,
     # white with the spoken word in yellow, large enough to read on a phone
     # (an ASS size of 135 is ~60 px cap height on the 1920 px frame).
@@ -339,6 +353,7 @@ def build_monitor_compose(platform: str, channel: str, clip: dict, override=None
         "hook_params": hook_params,
         "subtitle_params": subtitle_params,
         "banner_params": banner or {},
+        "layout_params": {"mode": "split"} if split else None,
     }
 
 
@@ -475,8 +490,19 @@ def _validate_clip_selection(value) -> str:
 # Defaults tuned for clipping live streams on new accounts: post while the
 # moment is fresh, give the owner a window to discard, cap the daily volume.
 DEFAULT_POST_TIMING = "asap"
+# "split": facecam over gameplay (falls back to letterbox per clip when no
+# steady camera is found); "letterbox": the whole frame between black bars.
+LAYOUTS = ("split", "letterbox")
+DEFAULT_LAYOUT = "split"
 DEFAULT_MAX_POSTS_PER_DAY = 6
 DEFAULT_REVIEW_MINUTES = 15
+
+
+def _validate_layout(value) -> str:
+    layout = str(value or DEFAULT_LAYOUT).strip().lower()
+    if layout not in LAYOUTS:
+        raise ValidationError(f"layout must be one of {list(LAYOUTS)}")
+    return layout
 
 
 def _validate_post_timing(value) -> str:
@@ -603,6 +629,7 @@ def validate_monitor_config(config: dict, default_timezone: str = "Europe/Rome")
         # dashboard) before it publishes on its own. 0 = publish when due.
         "review_minutes": _clamp_int(config.get("review_minutes"),
                                      DEFAULT_REVIEW_MINUTES, 0, 1440),
+        "layout": _validate_layout(config.get("layout")),
     }
 
 
@@ -614,7 +641,7 @@ _UPDATABLE_CONFIG_FIELDS = (
     "segment_seconds", "prelive_skip_seconds", "platforms", "banner", "compose",
     "poll_interval", "delete_after_publish", "max_clips", "clip_selection",
     "min_viral_score", "smart_cut", "letterbox_zoom", "chat_signal",
-    "post_timing", "max_posts_per_day", "review_minutes",
+    "post_timing", "max_posts_per_day", "review_minutes", "layout",
 )
 
 # The full set of cfg keys worth persisting/restoring (mirrors
@@ -625,7 +652,7 @@ _SNAPSHOT_CONFIG_FIELDS = (
     "instructions", "caption_template", "title_template", "timezone",
     "banner", "compose", "catchup", "delete_after_publish", "max_clips",
     "clip_selection", "min_viral_score", "smart_cut", "letterbox_zoom",
-    "chat_signal", "post_timing", "max_posts_per_day", "review_minutes",
+    "chat_signal", "post_timing", "max_posts_per_day", "review_minutes", "layout",
 )
 
 
@@ -1965,7 +1992,8 @@ class LiveMonitor:
                 resolve_clip, job_id, idx, self._output_dir, require_file=True)
             recipe = build_monitor_compose(
                 self.platform, self.cfg["channel"], clip, self.cfg.get("compose"),
-                smart_cut=bool(self.cfg.get("smart_cut")))
+                smart_cut=bool(self.cfg.get("smart_cut")),
+                layout=self.cfg.get("layout") or DEFAULT_LAYOUT)
             composed = await compose_layers(
                 base_clip=resolved.clip_path, job_dir=resolved.job_dir, clip_index=idx,
                 metadata=resolved.metadata, clip_info=resolved.clip_info, **recipe)

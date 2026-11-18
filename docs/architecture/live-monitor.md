@@ -32,6 +32,15 @@ again automatically.
   (default 70), so a weak segment yields fewer clips or none. `max_clips: 0`
   means no cap. Monitor jobs never fall back to TextTiling or a whole-video
   render.
+- **Layout** (`layout`, default `split`): `split` renders the usual clipper
+  format from the clip's 16:9 source slice (`editing/split_layout.py`): the
+  streamer's camera on top (38 % of the height), found by OpenCV face
+  detection and accepted only when the face stays in place across 8 sampled
+  frames, and the gameplay below, centre-cropped and moved off the camera's
+  side. The attribution banner is off unless enabled explicitly, and the hook
+  (size L) sits on the seam. A clip with no steady camera (no webcam, a
+  full-screen camera) keeps the letterbox render. `letterbox` always uses the
+  letterbox render below.
 - **Look**: monitor clips always render with reframe `disabled` (letterbox,
   optional `letterbox_zoom`), a full-clip hook, the attribution banner attached
   under the video band, and subtitles; `smart_cut` is opt-in. All overridable

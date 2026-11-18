@@ -182,7 +182,7 @@ async def _apply_hook(
     ``reframe_mode`` is the literal 'disabled' (letterbox) — full clip then."""
     from clippyme.editing.hook_overlay import add_hook_to_video
 
-    hook_duration = None if reframe_mode == "disabled" else 4
+    hook_duration = None if reframe_mode in ("disabled", "split") else 4
 
     hook_output = os.path.join(job_dir, f"composed_hook_{clip_index}.mp4")
     intermediate_files.append(hook_output)
@@ -413,6 +413,7 @@ async def compose_layers(
     grade_params: dict = None,
     banner_params: dict = None,
     drop_ranges=None,
+    layout_params: dict = None,
 ) -> str:
     """Run the active layer pipeline. Returns the final composed filename (basename).
 
@@ -432,6 +433,7 @@ async def compose_layers(
             hook_params=hook_params, subtitle_params=subtitle_params,
             logo_params=logo_params, grade_params=grade_params,
             banner_params=banner_params, drop_ranges=drop_ranges,
+            layout_params=layout_params,
         )
 
 
@@ -449,6 +451,7 @@ async def _compose_layers_impl(
     grade_params: dict = None,
     banner_params: dict = None,
     drop_ranges=None,
+    layout_params: dict = None,
 ) -> str:
     active = {k: v for k, v in toggles.items() if v}
     # The banner can be enabled via its own params.enabled (frontend convention)
@@ -483,6 +486,25 @@ async def _compose_layers_impl(
     layers_applied: list[str] = []
 
     try:
+        # Layout first: a split clip (facecam on top, gameplay below) replaces
+        # the letterboxed base, and every overlay is then drawn on the split.
+        # No steady camera found → the letterbox base stays (render_split None).
+        if (layout_params or {}).get("mode") == "split":
+            from clippyme.editing.split_layout import render_split
+            source = os.path.join(os.path.dirname(base_clip),
+                                  "source_" + os.path.basename(base_clip))
+            if os.path.exists(source):
+                split_path = os.path.join(job_dir, f"composed_split_{clip_index}.mp4")
+                intermediate_files.append(split_path)
+                done = await asyncio.to_thread(render_split, source, split_path)
+                if done:
+                    current_input = split_path
+                    clip_info = {**(clip_info or {}), "reframe_mode": "split"}
+                    layers_applied.append("split")
+            else:
+                logger.info("compose_layers: no 16:9 source slice for split layout, "
+                            "keeping the letterbox base")
+
         # --- Ordering matters ---
         # Earlier revisions ran Smart Cut FIRST, then burned subtitles on
         # the resulting shorter clip. The subtitle timestamps are derived
